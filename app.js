@@ -53,7 +53,7 @@ function status(pid) {
   const rs = rounds();
   for (let i = rs.length - 1; i >= 0; i--) {
     const d = duelsOf(rs[i].id).find((x) => x.p1 === pid || x.p2 === pid);
-    if (d) return loserOf(d) === pid ? 'out' : 'in';
+    if (d) return loserOf(d) === pid ? (i === 0 && rs.length === 1 ? 'baraz' : 'out') : 'in';
   }
   return 'in';
 }
@@ -180,7 +180,7 @@ function viewPlayers() {
   const ps = players().map((p) => ({ p, s: status(p.id), r: record(p.id) }))
     .sort((a, b) => (a.s === 'champ' ? -1 : 0) - (b.s === 'champ' ? -1 : 0) || (a.s === 'out') - (b.s === 'out') || b.r.w - a.r.w || nm(a.p).localeCompare(nm(b.p)));
   const fans = S.data.profiles.filter((p) => !p.is_player);
-  const badge = { champ: '<span class="badge gold">♛ Mistrz</span>', in: '<span class="badge green">W grze</span>', out: '<span class="badge">Odpadł(a)</span>' };
+  const badge = { champ: '<span class="badge gold">♛ Mistrz</span>', in: '<span class="badge green">W grze</span>', baraz: '<span class="badge gold">Baraż</span>', out: '<span class="badge">Odpadł(a)</span>' };
   return `<section class="block">
     <div class="block-head"><h2>Zawodnicy <span class="muted">${ps.length}</span></h2></div>
     ${ps.length ? `<div class="grid players">${ps.map(({ p, s, r }) => `<div class="pcard spot ${s}">${av(p, 'md')}<div class="pc-txt"><b>${esc(nm(p))}</b>${sub(p) ? `<small>${esc(sub(p))}</small>` : ''}</div><div class="pc-side">${badge[s]}<span class="wl">${r.w}–${r.l}</span></div></div>`).join('')}</div>`
@@ -255,10 +255,15 @@ function suggestName(source, n) {
   const pairs = Math.ceil(n / 2);
   return pairs === 1 ? 'Finał' : pairs === 2 ? 'Półfinały' : pairs === 4 && n === 8 ? 'Ćwierćfinały' : `Runda ${S.data.rounds.length + 1}`;
 }
+function defaultSource() {
+  const rs = rounds(); const last = rs[rs.length - 1];
+  // po zakończonej 1. rundzie domyślnie baraż z jej przegranych (walka o miejsca w ósemce)
+  const r1done = rs.length === 1 && duelsOf(last.id).every((d) => d.status === 'done');
+  return r1done ? 'l:' + last.id : last ? 'alive' : 'all';
+}
 function ensureDraft() {
   if (S.draft) return S.draft;
-  const rs = rounds(); const last = rs[rs.length - 1];
-  const source = last ? 'alive' : 'all';
+  const source = defaultSource();
   const pool = new Set(poolFor(source));
   return (S.draft = { source, pool, name: suggestName(source, pool.size), named: false, randomCats: true, start: 'live', pairs: null });
 }
@@ -266,6 +271,7 @@ function ensureDraft() {
 function viewAdmin() {
   if (!S.admin) return `<section class="block"><div class="empty spot"><h3>Tylko dla adminów</h3></div></section>`;
   const dr = ensureDraft(), rs = rounds();
+  if (!dr.custom && !dr.pairs && !dr.srcTouched) dr.source = defaultSource();
   if (!dr.custom && !dr.pairs) { dr.pool = new Set(poolFor(dr.source)); if (!dr.named) dr.name = suggestName(dr.source, dr.pool.size); }
   const sources = [['alive', 'Wszyscy, którzy są jeszcze w grze'], ['all', 'Wszyscy zawodnicy'], ...rs.flatMap((r) => [['w:' + r.id, `Zwycięzcy: ${r.name}`], ['l:' + r.id, `Przegrani: ${r.name}`]])];
   const people = [...S.data.profiles].sort((a, b) => b.is_player - a.is_player || nm(a).localeCompare(nm(b), 'pl'));
@@ -274,6 +280,7 @@ function viewAdmin() {
     <div class="admin-grid">
     <div class="panel spot">
       <h3>🎲 Nowa runda</h3>
+      <p class="muted small fmt">Format: przegrany odpada. Wyjątek: przegrani z 1. rundy grają baraż o 2 wolne miejsca w ósemce (np. 6 → 3, potem 3 → 2 z wolnym losem). Potem „Wszyscy jeszcze w grze” daje ósemkę.</p>
       <label class="lbl">Kto wchodzi do rundy<select data-act="draft-source">${sources.map(([v, l]) => `<option value="${v}" ${dr.source === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
       <div class="pool">${players().map((p) => `<label class="pool-item ${dr.pool.has(p.id) ? 'on' : ''}"><input type="checkbox" data-act="draft-pool" value="${p.id}" ${dr.pool.has(p.id) ? 'checked' : ''}>${av(p, 'xs')}${esc(nm(p))}</label>`).join('') || '<p class="muted">Najpierw oznacz zawodników w liście „Ludzie”.</p>'}</div>
       <p class="muted small">${plural(dr.pool.size, 'osoba', 'osoby', 'osób')} → ${plural(Math.floor(dr.pool.size / 2), 'pojedynek', 'pojedynki', 'pojedynków')}${dr.pool.size % 2 ? ' + 1 wolny los' : ''}</p>
@@ -442,7 +449,7 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('change', (e) => {
   const t = e.target, a = t.dataset?.act;
-  if (a === 'draft-source') { const dr = ensureDraft(); dr.source = t.value; dr.custom = false; dr.pool = new Set(poolFor(t.value)); if (!dr.named) dr.name = suggestName(dr.source, dr.pool.size); dr.pairs = null; render(); }
+  if (a === 'draft-source') { const dr = ensureDraft(); dr.source = t.value; dr.srcTouched = true; dr.custom = false; dr.pool = new Set(poolFor(t.value)); if (!dr.named) dr.name = suggestName(dr.source, dr.pool.size); dr.pairs = null; render(); }
   if (a === 'draft-pool') { const dr = ensureDraft(); dr.custom = true; t.checked ? dr.pool.add(t.value) : dr.pool.delete(t.value); if (!dr.named) dr.name = suggestName(dr.source, dr.pool.size); dr.pairs = null; render(); }
   if (a === 'draft-start') ensureDraft().start = t.value;
   if (a === 'pair-sel') { S.draft.pairs[+t.dataset.i][+t.dataset.k] = t.value || null; render(); }
