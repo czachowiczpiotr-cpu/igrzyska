@@ -14,7 +14,17 @@ const P = (id) => S.data.profiles.find((p) => p.id === id);
 const C = (id) => S.data.categories.find((c) => c.id === id);
 const R = (id) => S.data.rounds.find((r) => r.id === id);
 const D = (id) => S.data.duels.find((d) => d.id === id);
-const nm = (p) => (p ? p.nickname || p.full_name.split(' ')[0] : 'TBA');
+const nm = (p) => (p ? p.nickname || p.full_name : 'TBA');
+const sub = (p) => (p?.nickname ? p.full_name : '');
+const canTipOn = (d) => d && d.status !== 'done' && !d.tips_locked && d.p1 && d.p2;
+function tipRanking() {
+  const pts = {};
+  S.data.predictions.forEach((pr) => {
+    const d = D(pr.duel_id); const o = (pts[pr.user_id] ||= { hit: 0, all: 0 });
+    if (d?.status === 'done' && d.winner) { o.all++; if (d.winner === pr.pick) o.hit++; }
+  });
+  return Object.entries(pts).map(([id, o]) => ({ p: P(id), ...o })).filter((r) => r.p && r.all).sort((a, b) => b.hit - a.hit || a.all - b.all);
+}
 const hue = (id = '') => [...id].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
 const initials = (p) => (p ? (p.nickname || p.full_name).split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase() : '?');
 const av = (p, cls = '') => `<span class="av ${cls}" style="--h:${p ? hue(p.id) : 0}">${p ? esc(initials(p)) : '?'}</span>`;
@@ -108,7 +118,7 @@ function duelMini(d) {
   return `<button class="duel-mini spot ${d.status}" data-act="duel" data-id="${d.id}">
     ${row(a, d.p1, d.score1)}${row(b, d.p2, d.score2)}
     <div class="dm-foot">${isBye(d) ? '<span class="muted">Awans bez walki</span>' : c ? `<span class="cat-chip">${esc(c.emoji || '•')} ${esc(c.name)}</span>` : '<span class="muted">Kategoria: ?</span>'}
-    ${d.status === 'live' ? '<span class="live-tag">NA ŻYWO</span>' : d.when_at && d.status === 'pending' ? `<span class="muted">${esc(d.when_at)}</span>` : ''}</div>
+    ${d.status === 'live' ? '<span class="live-tag">TRWA</span>' : d.when_at && d.status === 'pending' ? `<span class="muted">${esc(d.when_at)}</span>` : ''}</div>
   </button>`;
 }
 
@@ -118,6 +128,7 @@ function viewArena() {
   const played = S.data.duels.filter((d) => d.status === 'done' && !isBye(d)).length;
   const unused = S.data.categories.filter((c) => !usedCatIds().has(c.id));
   const nx = nextDuel();
+  const live = rounds().flatMap((r) => duelsOf(r.id)).filter((d) => d.status === 'live');
   const champ = ch ? P(ch) : null;
   return `
   <section class="hero">
@@ -131,8 +142,8 @@ function viewArena() {
       <div class="stat spot"><b>${unused.length}</b><span>kategorii w puli</span></div>
     </div>
   </section>
-  ${champ ? `<section class="champ spot"><div class="champ-glow"></div><span class="eyebrow">Mistrz Igrzysk</span>${av(champ, 'xl')}<h2>${esc(nm(champ))}</h2><p class="muted">${esc(champ.full_name)} · ${record(champ.id).w} wygranych</p></section>` : ''}
-  ${nx ? featured(nx) : ''}
+  ${champ ? finals(champ) : ''}
+  ${live.length ? `<section class="block"><div class="block-head"><h2>Trwa teraz <span class="muted">${live.length}</span></h2></div><div class="live-grid">${live.map(featured).join('')}</div></section>` : nx ? featured(nx) : ''}
   <section class="block">
     <div class="block-head"><h2>Drabinka</h2>${S.admin ? `<a class="btn ghost sm" href="#/admin">+ Nowa runda</a>` : ''}</div>
     ${rs.length ? `<div class="rounds" id="rounds">${rs.map((r) => {
@@ -144,14 +155,22 @@ function viewArena() {
   ${unused.length ? `<section class="marquee" aria-label="Kategorie w puli"><div class="mq-track">${[...unused, ...unused].map((c) => `<span>${esc(c.emoji || '◆')} ${esc(c.name)}</span>`).join('')}</div></section>` : ''}`;
 }
 
+function finals(champ) {
+  const top = tipRanking()[0];
+  return `<section class="finals">
+    <div class="champ spot"><div class="champ-glow"></div><span class="eyebrow">Mistrz Igrzysk</span>${av(champ, 'xl')}<h2>${esc(nm(champ))}</h2><p class="muted">Najlepszy z najlepszych · ${plural(record(champ.id).w, 'wygrana', 'wygrane', 'wygranych')}</p></div>
+    ${top ? `<div class="champ spot alt"><div class="champ-glow"></div><span class="eyebrow">Mistrz Typowania</span>${av(top.p, 'xl')}<h2>${esc(nm(top.p))}</h2><p class="muted">${top.hit} z ${top.all} trafionych typów</p></div>` : ''}
+  </section>`;
+}
+
 function featured(d) {
   const a = P(d.p1), b = P(d.p2), c = C(d.category_id), r = R(d.round_id);
   return `<section class="featured spot ${d.status}" data-act="duel" data-id="${d.id}" role="button" tabindex="0">
-    <div class="ft-top"><span class="eyebrow">${d.status === 'live' ? '<span class="live-tag">NA ŻYWO</span>' : 'Następny pojedynek'} · ${esc(r?.name || '')}</span>${d.when_at ? `<span class="muted">${esc(d.when_at)}</span>` : ''}</div>
+    <div class="ft-top"><span class="eyebrow">${d.status === 'live' ? '<span class="live-tag">TRWA</span>' : 'Następny pojedynek'} · ${esc(r?.name || '')}</span>${d.when_at ? `<span class="muted">${esc(d.when_at)}</span>` : ''}</div>
     <div class="vs">
-      <div class="vs-side">${av(a, 'lg')}<b>${esc(nm(a))}</b><small>${esc(a?.full_name || '')}</small></div>
+      <div class="vs-side">${av(a, 'lg')}<b>${esc(nm(a))}</b><small>${esc(sub(a))}</small></div>
       <div class="vs-mid"><span>VS</span></div>
-      <div class="vs-side">${av(b, 'lg')}<b>${esc(nm(b))}</b><small>${esc(b?.full_name || '')}</small></div>
+      <div class="vs-side">${av(b, 'lg')}<b>${esc(nm(b))}</b><small>${esc(sub(b))}</small></div>
     </div>
     <div class="ft-cat">${c ? `<span class="cat-big">${esc(c.emoji || '◆')}</span><span><b>${esc(c.name)}</b>${c.description ? `<small>${esc(c.description)}</small>` : ''}</span>` : '<span class="muted">Kategoria zostanie wylosowana</span>'}</div>
   </section>`;
@@ -164,7 +183,7 @@ function viewPlayers() {
   const badge = { champ: '<span class="badge gold">♛ Mistrz</span>', in: '<span class="badge green">W grze</span>', out: '<span class="badge">Odpadł(a)</span>' };
   return `<section class="block">
     <div class="block-head"><h2>Zawodnicy <span class="muted">${ps.length}</span></h2></div>
-    ${ps.length ? `<div class="grid players">${ps.map(({ p, s, r }) => `<div class="pcard spot ${s}">${av(p, 'md')}<div class="pc-txt"><b>${esc(nm(p))}</b><small>${esc(p.full_name)}</small></div><div class="pc-side">${badge[s]}<span class="wl">${r.w}–${r.l}</span></div></div>`).join('')}</div>`
+    ${ps.length ? `<div class="grid players">${ps.map(({ p, s, r }) => `<div class="pcard spot ${s}">${av(p, 'md')}<div class="pc-txt"><b>${esc(nm(p))}</b>${sub(p) ? `<small>${esc(sub(p))}</small>` : ''}</div><div class="pc-side">${badge[s]}<span class="wl">${r.w}–${r.l}</span></div></div>`).join('')}</div>`
     : `<div class="empty spot"><h3>Brak zawodników</h3><p class="muted">Admin oznacza, kto bierze udział, w panelu.</p></div>`}
     ${S.user && S.me && !S.me.is_player ? `<p class="hint">Jesteś na liście kibiców. Zawodników dodają admini.</p>` : ''}
     ${fans.length ? `<h3 class="sub-h">Kibice</h3><div class="fans">${fans.map((p) => `<span class="fan">${av(p, 'xs')}${esc(nm(p))}</span>`).join('')}</div>` : ''}
@@ -192,16 +211,12 @@ function viewCategories() {
 }
 
 function viewTips() {
-  const pts = {};
-  S.data.predictions.forEach((pr) => {
-    const d = D(pr.duel_id); const o = (pts[pr.user_id] ||= { hit: 0, all: 0 });
-    if (d?.status === 'done' && d.winner) { o.all++; if (d.winner === pr.pick) o.hit++; }
-  });
-  const rows = Object.entries(pts).map(([id, o]) => ({ p: P(id), ...o })).filter((r) => r.p).sort((a, b) => b.hit - a.hit || a.all - b.all);
-  const open = rounds().flatMap((r) => duelsOf(r.id)).filter((d) => d.status === 'pending' && d.p1 && d.p2);
+  const rows = tipRanking();
+  const open = rounds().flatMap((r) => duelsOf(r.id)).filter(canTipOn);
   return `<section class="block">
     <div class="block-head"><h2>Typy</h2></div>
-    <p class="lead small">Przed każdym pojedynkiem obstaw, kto wygra. 1 punkt za trafienie. Typowanie zamyka się, gdy walka startuje.</p>
+    <p class="lead small">Przed każdym pojedynkiem obstaw, kto wygra. 1 punkt za trafienie. Typowanie zamykają moderatorzy (albo samo, gdy walka się skończy). Na koniec igrzysk obok Mistrza Igrzysk ogłaszamy też Mistrza Typowania.</p>
+    ${rows.length ? `<div class="typer-lead spot">${av(rows[0].p, 'md')}<div><span class="eyebrow">${champion() ? 'Mistrz Typowania' : 'Prowadzi w typowaniu'}</span><b>${esc(nm(rows[0].p))}</b></div><b class="tl-pts">${rows[0].hit} pkt</b></div>` : ''}
     ${open.length ? `<h3 class="sub-h">Do obstawienia</h3><div class="grid duels-open">${open.map((d) => {
       const mine = S.user && predsOf(d.id).find((p) => p.user_id === S.user.id);
       return `<button class="open-tip spot" data-act="duel" data-id="${d.id}">${av(P(d.p1), 'xs')}<b>${esc(nm(P(d.p1)))}</b><span class="muted">vs</span><b>${esc(nm(P(d.p2)))}</b>${av(P(d.p2), 'xs')}<span class="ot-state ${mine ? 'done' : ''}">${mine ? '✓ ' + esc(nm(P(mine.pick))) : 'Typuj →'}</span></button>`;
@@ -219,8 +234,7 @@ function viewProfile() {
     <div class="block-head"><h2>Profil</h2></div>
     <div class="profile-card spot">${av(S.me, 'lg')}<div><b>${esc(nm(S.me))}</b><small class="muted">${esc(S.user.email)}</small>${S.admin ? '<span class="badge gold">Admin</span>' : ''}${p.is_player ? '<span class="badge green">Zawodnik</span>' : '<span class="badge">Kibic</span>'}</div></div>
     <form class="form" data-form="profile">
-      <label>Imię i nazwisko<input name="full_name" required minlength="2" maxlength="60" value="${esc(p.full_name || '')}"></label>
-      <label>Ksywa <span class="muted">(widoczna wszędzie)</span><input name="nickname" maxlength="30" value="${esc(p.nickname || '')}"></label>
+      <label>Imię i nazwisko lub ksywa<input name="full_name" required maxlength="40" value="${esc(nm(S.me) === 'TBA' ? '' : nm(S.me))}"></label>
       <button class="btn btn-gold">Zapisz</button>
     </form>
     <form class="form" data-form="password"><label>Nowe hasło<input name="password" type="password" minlength="6" required autocomplete="new-password"></label><button class="btn ghost">Zmień hasło</button></form>
@@ -246,7 +260,7 @@ function ensureDraft() {
   const rs = rounds(); const last = rs[rs.length - 1];
   const source = last ? 'alive' : 'all';
   const pool = new Set(poolFor(source));
-  return (S.draft = { source, pool, name: suggestName(source, pool.size), named: false, randomCats: true, pairs: null });
+  return (S.draft = { source, pool, name: suggestName(source, pool.size), named: false, randomCats: true, start: 'live', pairs: null });
 }
 
 function viewAdmin() {
@@ -264,20 +278,31 @@ function viewAdmin() {
       <div class="pool">${players().map((p) => `<label class="pool-item ${dr.pool.has(p.id) ? 'on' : ''}"><input type="checkbox" data-act="draft-pool" value="${p.id}" ${dr.pool.has(p.id) ? 'checked' : ''}>${av(p, 'xs')}${esc(nm(p))}</label>`).join('') || '<p class="muted">Najpierw oznacz zawodników w liście „Ludzie”.</p>'}</div>
       <p class="muted small">${plural(dr.pool.size, 'osoba', 'osoby', 'osób')} → ${plural(Math.floor(dr.pool.size / 2), 'pojedynek', 'pojedynki', 'pojedynków')}${dr.pool.size % 2 ? ' + 1 wolny los' : ''}</p>
       <label class="lbl">Nazwa rundy<input data-act="draft-name" value="${esc(dr.name)}" maxlength="40"></label>
-      <label class="check"><input type="checkbox" data-act="draft-cats" ${dr.randomCats ? 'checked' : ''}> Od razu losuj kategorie (z nieużytych)</label>
-      <div class="row-gap"><button class="btn btn-gold" data-act="draft-roll" ${dr.pool.size < 2 ? 'disabled' : ''}>${dr.pairs ? 'Losuj ponownie' : 'Losuj pary'}</button>${dr.pairs ? `<button class="btn ghost" data-act="draft-save">Zatwierdź rundę ✓</button>` : ''}</div>
-      ${dr.pairs ? `<div class="pairs ${dr.rolling ? 'rolling' : ''}">${dr.pairs.map((pr, i) => `<div class="pair"><span class="pn">${i + 1}</span>${av(P(pr[0]), 'xs')}<b>${esc(nm(P(pr[0])))}</b><span class="muted">vs</span>${pr[1] ? `<b>${esc(nm(P(pr[1])))}</b>${av(P(pr[1]), 'xs')}` : '<em class="muted">wolny los</em>'}<span class="pc">${pr[2] ? esc((C(pr[2])?.emoji || '') + ' ' + C(pr[2])?.name) : ''}</span></div>`).join('')}</div>` : ''}
+      <label class="check"><input type="checkbox" data-act="draft-cats" ${dr.randomCats ? 'checked' : ''}> Od razu losuj kategorie (można też później)</label>
+      <label class="lbl">Start walk<select data-act="draft-start"><option value="live" ${dr.start !== 'pending' ? 'selected' : ''}>Wszystkie trwają od razu (równolegle)</option><option value="pending" ${dr.start === 'pending' ? 'selected' : ''}>Czekają — startujemy ręcznie</option></select></label>
+      <div class="row-gap"><button class="btn btn-gold" data-act="draft-roll" ${dr.pool.size < 2 ? 'disabled' : ''}>${dr.pairs ? 'Losuj ponownie' : '🎲 Losuj pary'}</button><button class="btn ghost" data-act="draft-manual">Ułóż ręcznie</button>${dr.pairs ? `<button class="btn ghost" data-act="draft-save">Zatwierdź rundę ✓</button>` : ''}</div>
+      ${dr.pairs ? (dr.rolling
+        ? `<div class="pairs rolling">${dr.pairs.map((pr, i) => `<div class="pair"><span class="pn">${i + 1}</span>${av(P(pr[0]), 'xs')}<b>${esc(nm(P(pr[0])))}</b><span class="muted">vs</span>${pr[1] ? `<b>${esc(nm(P(pr[1])))}</b>${av(P(pr[1]), 'xs')}` : '<em class="muted">wolny los</em>'}</div>`).join('')}</div>`
+        : `<p class="muted small mt-s">Możesz poprawić każdą parę i kategorię przed zatwierdzeniem.</p><div class="pairs">${dr.pairs.map((pr, i) => pairEditor(pr, i)).join('')}<button class="btn ghost sm" data-act="pair-add">+ Dodaj parę</button></div>`) : ''}
     </div>
     <div class="panel spot">
       <h3>Rundy</h3>
-      ${rs.length ? rs.map((r) => `<div class="adm-row"><b>${esc(r.name)}</b><span class="muted">${plural(duelsOf(r.id).length, 'walka', 'walki', 'walk')}</span><span class="grow"></span><button class="btn ghost xs" data-act="round-rename" data-id="${r.id}">Zmień nazwę</button><button class="btn ghost xs danger" data-act="round-del" data-id="${r.id}">Usuń</button></div>`).join('') : '<p class="muted">Brak rund.</p>'}
+      ${rs.length ? rs.map((r) => `<div class="adm-row"><b>${esc(r.name)}</b><span class="muted">${plural(duelsOf(r.id).length, 'walka', 'walki', 'walk')}</span><span class="grow"></span><span class="row-gap"><button class="btn ghost xs" data-act="round-cats" data-id="${r.id}" title="Wylosuj kategorie walkom, które jeszcze ich nie mają">🎲 Kategorie</button><button class="btn ghost xs" data-act="round-start" data-id="${r.id}">▶ Start</button><button class="btn ghost xs" data-act="round-add" data-id="${r.id}">+ Walka</button><button class="btn ghost xs" data-act="round-rename" data-id="${r.id}">Nazwa</button><button class="btn ghost xs danger" data-act="round-del" data-id="${r.id}">Usuń</button></span></div>`).join('') : '<p class="muted">Brak rund.</p>'}
       <h3 class="mt">Ludzie <span class="muted">${S.data.profiles.length}</span></h3>
       <p class="muted small">Zaznacz, kto jest zawodnikiem. Reszta to kibice (mogą typować).</p>
-      ${people.map((p) => `<div class="adm-row">${av(p, 'xs')}<b>${esc(nm(p))}</b><span class="muted small">${esc(p.full_name)}</span><span class="grow"></span><label class="switch"><input type="checkbox" data-act="toggle-player" data-id="${p.id}" ${p.is_player ? 'checked' : ''}><span></span></label><button class="btn ghost xs danger" data-act="person-del" data-id="${p.id}" title="Usuń profil">✕</button></div>`).join('')}
+      ${people.map((p) => `<div class="adm-row">${av(p, 'xs')}<b>${esc(nm(p))}</b><span class="muted small">${esc(sub(p))}</span><span class="grow"></span><label class="switch"><input type="checkbox" data-act="toggle-player" data-id="${p.id}" ${p.is_player ? 'checked' : ''}><span></span></label><button class="btn ghost xs danger" data-act="person-del" data-id="${p.id}" title="Usuń profil">✕</button></div>`).join('')}
       ${api.mode === 'demo' ? `<h3 class="mt">Demo</h3><div class="row-gap"><button class="btn ghost sm" data-act="demo-seed">Wczytaj przykładowych ludzi i kategorie</button><button class="btn ghost sm danger" data-act="demo-reset">Wyczyść wszystko</button></div>` : ''}
     </div>
     </div>
   </section>`;
+}
+
+function pairEditor(pr, i) {
+  const used = new Set(S.draft.pairs.flatMap((x, j) => (j === i ? [] : [x[0], x[1]])).filter(Boolean));
+  const pOpts = (sel, empty) => `<option value="">${empty}</option>` + players().map((p) => `<option value="${p.id}" ${sel === p.id ? 'selected' : ''}>${used.has(p.id) && sel !== p.id ? '· ' : ''}${esc(nm(p))}</option>`).join('');
+  const usedC = new Set([...usedCatIds(), ...S.draft.pairs.filter((x, j) => j !== i).map((x) => x[2]).filter(Boolean)]);
+  const cOpts = `<option value="">— kategoria później —</option>` + S.data.categories.filter((c) => !usedC.has(c.id) || c.id === pr[2]).map((c) => `<option value="${c.id}" ${pr[2] === c.id ? 'selected' : ''}>${esc((c.emoji || '') + ' ' + c.name)}</option>`).join('');
+  return `<div class="pair edit"><span class="pn">${i + 1}</span><select data-act="pair-sel" data-i="${i}" data-k="0">${pOpts(pr[0], '— wybierz —')}</select><span class="muted">vs</span><select data-act="pair-sel" data-i="${i}" data-k="1">${pOpts(pr[1], '— wolny los —')}</select><select class="pair-cat" data-act="pair-sel" data-i="${i}" data-k="2">${cOpts}</select><button class="btn ghost xs danger" data-act="pair-del" data-i="${i}" aria-label="Usuń parę">✕</button></div>`;
 }
 
 /* ---------- modals ---------- */
@@ -285,7 +310,7 @@ function modalHtml() {
   const m = S.modal; if (!m) return '';
   let body = '';
   if (m.type === 'login') body = loginModal(m);
-  if (m.type === 'profile-setup') body = `<h2>Jeszcze jedno</h2><p class="muted">Jak mamy cię wyświetlać?</p><form class="form" data-form="profile"><label>Imię i nazwisko<input name="full_name" required minlength="2" maxlength="60"></label><label>Ksywa<input name="nickname" maxlength="30"></label><button class="btn btn-gold">Gotowe</button></form>`;
+  if (m.type === 'profile-setup') body = `<h2>Jeszcze jedno</h2><p class="muted">Jak mamy cię wyświetlać?</p><form class="form" data-form="profile"><label>Imię i nazwisko lub ksywa<input name="full_name" required maxlength="40"></label><button class="btn btn-gold">Gotowe</button></form>`;
   if (m.type === 'duel') body = duelModal(D(m.id));
   if (m.type === 'cat') body = catModal(m.id ? C(m.id) : null);
   if (m.type === 'cat-bulk') body = `<h2>Wklej listę kategorii</h2><p class="muted small">Jedna kategoria w linii. Format: <code>emoji Nazwa — opis</code> (emoji i opis opcjonalne).</p><form class="form" data-form="cat-bulk"><textarea name="txt" rows="10" placeholder="🎂 Kto upiecze lepsze ciasto — ocenia jury&#10;👟 Kto zrobi więcej kroków — w ciągu jednego dnia"></textarea><button class="btn btn-gold">Dodaj wszystkie</button></form>`;
@@ -299,7 +324,7 @@ function loginModal(m) {
   return `<div class="seg full">${[['in', 'Logowanie'], ['up', 'Nowe konto']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="login-tab" data-t="${k}">${l}</button>`).join('')}</div>
   ${tab === 'in'
     ? `<form class="form" data-form="signin"><label>E-mail<input name="email" type="email" required autocomplete="email"></label><label>Hasło<input name="password" type="password" required autocomplete="current-password"></label><button class="btn btn-gold">Wejdź na arenę</button>${api.mode === 'cloud' ? '<button type="button" class="link" data-act="forgot">Nie pamiętam hasła</button>' : ''}</form>`
-    : `<form class="form" data-form="signup"><label>Imię i nazwisko<input name="full_name" required minlength="2" maxlength="60" autocomplete="name"></label><label>Ksywa <span class="muted">(opcjonalnie)</span><input name="nickname" maxlength="30"></label><label>E-mail<input name="email" type="email" required autocomplete="email"></label><label>Hasło <span class="muted">(min. 6 znaków)</span><input name="password" type="password" minlength="6" required autocomplete="new-password"></label><button class="btn btn-gold">Załóż konto</button></form>`}`;
+    : `<form class="form" data-form="signup"><label>Imię i nazwisko lub ksywa<input name="full_name" required maxlength="40" autocomplete="nickname" placeholder="np. Jan Kowalski albo Kowal"></label><label>E-mail<input name="email" type="email" required autocomplete="email"></label><label>Hasło <span class="muted">(min. 6 znaków)</span><input name="password" type="password" minlength="6" required autocomplete="new-password"></label><button class="btn btn-gold">Załóż konto</button></form>`}`;
 }
 
 function duelModal(d) {
@@ -308,22 +333,22 @@ function duelModal(d) {
   const preds = predsOf(d.id), mine = S.user && preds.find((p) => p.user_id === S.user.id);
   const n1 = preds.filter((p) => p.pick === d.p1).length, n2 = preds.filter((p) => p.pick === d.p2).length, tot = n1 + n2;
   const pct1 = tot ? Math.round((n1 / tot) * 100) : 50;
-  const side = (p, pid, score) => `<div class="vs-side ${d.status === 'done' && d.winner === pid ? 'winner' : d.status === 'done' && d.winner ? 'loser' : ''}">${d.status === 'done' && d.winner === pid ? '<span class="crown big">♛</span>' : ''}${av(p, 'lg')}<b>${pid ? esc(nm(p)) : 'wolny los'}</b><small>${esc(p?.full_name || '')}</small>${score ? `<span class="score">${esc(score)}</span>` : ''}</div>`;
-  const canTip = S.user && d.status === 'pending' && d.p1 && d.p2;
-  return `<p class="eyebrow">${esc(r?.name || '')} · ${d.status === 'live' ? '<span class="live-tag">NA ŻYWO</span>' : d.status === 'done' ? 'Zakończony' : 'Oczekuje'}${d.when_at ? ' · ' + esc(d.when_at) : ''}</p>
+  const side = (p, pid, score) => `<div class="vs-side ${d.status === 'done' && d.winner === pid ? 'winner' : d.status === 'done' && d.winner ? 'loser' : ''}">${d.status === 'done' && d.winner === pid ? '<span class="crown big">♛</span>' : ''}${av(p, 'lg')}<b>${pid ? esc(nm(p)) : 'wolny los'}</b><small>${esc(sub(p))}</small>${score ? `<span class="score">${esc(score)}</span>` : ''}</div>`;
+  const canTip = S.user && canTipOn(d);
+  return `<p class="eyebrow">${esc(r?.name || '')} · ${d.status === 'live' ? '<span class="live-tag">TRWA</span>' : d.status === 'done' ? 'Zakończony' : 'Oczekuje'}${d.when_at ? ' · ' + esc(d.when_at) : ''}</p>
   <div class="vs modal-vs">${side(a, d.p1, d.score1)}<div class="vs-mid"><span>VS</span></div>${side(b, d.p2, d.score2)}</div>
   <div class="cat-box" id="cat-box">${c ? `<span class="cat-big">${esc(c.emoji || '◆')}</span><div><b>${esc(c.name)}</b>${c.description ? `<p>${esc(c.description)}</p>` : ''}</div>` : `<span class="cat-big">?</span><div><b>Kategoria jeszcze nie wylosowana</b></div>`}</div>
   ${d.note ? `<p class="note">${esc(d.note)}</p>` : ''}
   ${d.p1 && d.p2 ? `<div class="tips">
-    <div class="tips-head"><b>${d.status === 'pending' ? 'Kto wygra?' : 'Typy'}</b><span class="muted small">${plural(tot, 'typ', 'typy', 'typów')}</span></div>
-    ${canTip ? `<div class="tip-btns"><button class="btn ${mine?.pick === d.p1 ? 'btn-gold' : 'ghost'}" data-act="tip" data-id="${d.id}" data-pick="${d.p1}">${esc(nm(a))}</button><button class="btn ${mine?.pick === d.p2 ? 'btn-gold' : 'ghost'}" data-act="tip" data-id="${d.id}" data-pick="${d.p2}">${esc(nm(b))}</button></div>` : !S.user && d.status === 'pending' ? `<button class="btn ghost full" data-act="login">Zaloguj się, żeby typować</button>` : ''}
+    <div class="tips-head"><b>${canTipOn(d) ? 'Kto wygra?' : 'Typy'}</b>${!canTipOn(d) && d.status !== 'done' ? '<span class="muted small">typowanie zamknięte</span>' : ''}<span class="muted small">${plural(tot, 'typ', 'typy', 'typów')}</span></div>
+    ${canTip ? `<div class="tip-btns"><button class="btn ${mine?.pick === d.p1 ? 'btn-gold' : 'ghost'}" data-act="tip" data-id="${d.id}" data-pick="${d.p1}">${esc(nm(a))}</button><button class="btn ${mine?.pick === d.p2 ? 'btn-gold' : 'ghost'}" data-act="tip" data-id="${d.id}" data-pick="${d.p2}">${esc(nm(b))}</button></div>` : !S.user && canTipOn(d) ? `<button class="btn ghost full" data-act="login">Zaloguj się, żeby typować</button>` : ''}
     <div class="bar"><span style="width:${pct1}%"></span></div><div class="bar-l"><span>${esc(nm(a))} ${tot ? pct1 + '%' : ''}</span><span>${tot ? 100 - pct1 + '% ' : ''}${esc(nm(b))}</span></div>
   </div>` : ''}
   ${S.admin ? duelAdmin(d) : ''}`;
 }
 
 function duelAdmin(d) {
-  const opts = (sel) => `<option value="">— brak —</option>` + players().map((p) => `<option value="${p.id}" ${sel === p.id ? 'selected' : ''}>${esc(nm(p))} (${esc(p.full_name)})</option>`).join('');
+  const opts = (sel) => `<option value="">— brak —</option>` + players().map((p) => `<option value="${p.id}" ${sel === p.id ? 'selected' : ''}>${esc(nm(p))}</option>`).join('');
   const used = usedCatIds();
   const catOpts = `<option value="">— brak —</option>` + [...S.data.categories].sort((x, y) => x.name.localeCompare(y.name, 'pl')).map((c) => `<option value="${c.id}" ${d.category_id === c.id ? 'selected' : ''}>${esc((c.emoji || '') + ' ' + c.name)}${used.has(c.id) && c.id !== d.category_id ? ' (użyta)' : ''}</option>`).join('');
   return `<details class="adm" ${d.status !== 'done' ? 'open' : ''}><summary>Moderacja <i class="dot-admin"></i></summary>
@@ -333,6 +358,7 @@ function duelAdmin(d) {
     <div class="two"><label>Wynik 1<input name="score1" maxlength="30" value="${esc(d.score1 || '')}" placeholder="np. 12 430 kroków"></label><label>Wynik 2<input name="score2" maxlength="30" value="${esc(d.score2 || '')}"></label></div>
     <label>Zwycięzca<select name="winner"><option value="">— jeszcze nie —</option>${[d.p1, d.p2].filter(Boolean).map((id) => `<option value="${id}" ${d.winner === id ? 'selected' : ''}>${esc(nm(P(id)))}</option>`).join('')}</select></label>
     <div class="two cat-row"><label>Kategoria<select name="category_id" id="cat-sel">${catOpts}</select></label><button type="button" class="btn ghost" data-act="roll-cat">🎲 Losuj</button></div>
+    <label class="check"><input type="checkbox" name="tips_locked" ${d.tips_locked ? 'checked' : ''}> Zamknij typowanie</label>
     <label>Kiedy <span class="muted">(dowolny tekst)</span><input name="when_at" maxlength="40" value="${esc(d.when_at || '')}" placeholder="np. sobota 18:00, u Olka"></label>
     <label>Notatka<textarea name="note" rows="2" maxlength="300">${esc(d.note || '')}</textarea></label>
     <div class="row-gap"><button class="btn btn-gold">Zapisz</button><button type="button" class="btn ghost danger" data-act="duel-del" data-id="${d.id}">Usuń pojedynek</button></div>
@@ -401,12 +427,25 @@ document.addEventListener('click', async (e) => {
   if (a === 'roll-cat') return rollCategory();
   if (a === 'draft-roll') return rollPairs();
   if (a === 'draft-save') return saveDraft();
+  if (a === 'draft-manual') { const dr = ensureDraft(); const ids = [...dr.pool]; const pairs = []; for (let i = 0; i < Math.max(ids.length, 2); i += 2) pairs.push([ids[i] || null, ids[i + 1] || null, null]); if (dr.randomCats) assignCats(pairs); dr.pairs = pairs; return render(); }
+  if (a === 'pair-add') { S.draft.pairs.push([null, null, null]); return render(); }
+  if (a === 'pair-del') { S.draft.pairs.splice(+t.dataset.i, 1); if (!S.draft.pairs.length) S.draft.pairs = null; return render(); }
+  if (a === 'round-cats') {
+    const ds = duelsOf(id).filter((d) => d.p1 && d.p2 && !d.category_id); const pool = shuffle(freeCats());
+    if (!ds.length) return toast('Wszystkie walki w tej rundzie mają już kategorię.');
+    if (!pool.length) return toast('Brak wolnych kategorii — dodaj je w zakładce Kategorie.', 'err');
+    return act(async () => { for (const d of ds) { const c = pool.shift(); if (!c) break; await api.update('duels', { id: d.id }, { category_id: c.id }); } }, 'Kategorie wylosowane');
+  }
+  if (a === 'round-start') { const ds = duelsOf(id).filter((d) => d.status === 'pending' && d.p1 && d.p2); if (!ds.length) return toast('Nie ma walk do startu.'); return act(async () => { for (const d of ds) await api.update('duels', { id: d.id }, { status: 'live' }); }, `Wystartowało: ${ds.length}`); }
+  if (a === 'round-add') { try { const [d] = await api.insert('duels', { round_id: id, ord: Math.max(-1, ...duelsOf(id).map((x) => x.ord)) + 1, status: 'pending' }); await refresh(); S.modal = { type: 'duel', id: d.id }; render(); } catch (err) { toast(err.message, 'err'); } return; }
 });
 
 document.addEventListener('change', (e) => {
   const t = e.target, a = t.dataset?.act;
   if (a === 'draft-source') { const dr = ensureDraft(); dr.source = t.value; dr.custom = false; dr.pool = new Set(poolFor(t.value)); if (!dr.named) dr.name = suggestName(dr.source, dr.pool.size); dr.pairs = null; render(); }
   if (a === 'draft-pool') { const dr = ensureDraft(); dr.custom = true; t.checked ? dr.pool.add(t.value) : dr.pool.delete(t.value); if (!dr.named) dr.name = suggestName(dr.source, dr.pool.size); dr.pairs = null; render(); }
+  if (a === 'draft-start') ensureDraft().start = t.value;
+  if (a === 'pair-sel') { S.draft.pairs[+t.dataset.i][+t.dataset.k] = t.value || null; render(); }
   if (a === 'draft-cats') { ensureDraft().randomCats = t.checked; if (S.draft.pairs) assignCats(S.draft.pairs); render(); }
   if (a === 'toggle-player') act(() => api.update('profiles', { id: t.dataset.id }, { is_player: t.checked }), t.checked ? 'Dodano do zawodników' : 'Przeniesiono do kibiców').then(() => { if (S.draft) { S.draft.pool = new Set(poolFor(S.draft.source)); render(); } });
   if (t.closest?.('.seg') && t.type === 'radio') { t.closest('.seg').querySelectorAll('label').forEach((l) => l.classList.toggle('on', l.contains(t))); }
@@ -423,13 +462,14 @@ document.addEventListener('submit', async (e) => {
   try {
     if (k === 'signin') { await api.signIn(v); S.modal = null; toast('Witaj na arenie!'); await refresh(); }
     if (k === 'signup') {
-      const r = await api.signUp({ ...v, full_name: v.full_name.trim(), nickname: v.nickname.trim() });
+      const r = await api.signUp({ ...v, full_name: v.full_name.trim(), nickname: null });
       S.modal = null;
       toast(r.needsConfirm ? 'Sprawdź skrzynkę i kliknij link, żeby aktywować konto.' : 'Konto założone. Witaj!');
       await refresh();
     }
     if (k === 'profile') {
-      const row = { full_name: v.full_name.trim(), nickname: v.nickname.trim() || null };
+      const row = { full_name: v.full_name.trim(), nickname: null };
+      if (!row.full_name) throw new Error('Wpisz imię i nazwisko lub ksywę.');
       if (S.me) await api.update('profiles', { id: S.user.id }, row); else await api.insert('profiles', { id: S.user.id, ...row });
       if (S.modal?.type === 'profile-setup') S.modal = null;
       toast('Zapisano'); await refresh();
@@ -447,7 +487,7 @@ document.addEventListener('submit', async (e) => {
     }
     if (k === 'duel') {
       const n = (x) => x || null;
-      const patch = { status: v.status, p1: n(v.p1), p2: n(v.p2), score1: n(v.score1.trim()), score2: n(v.score2.trim()), winner: n(v.winner), category_id: n(v.category_id), when_at: n(v.when_at.trim()), note: n(v.note.trim()), updated_at: new Date().toISOString() };
+      const patch = { status: v.status, p1: n(v.p1), p2: n(v.p2), score1: n(v.score1.trim()), score2: n(v.score2.trim()), winner: n(v.winner), category_id: n(v.category_id), when_at: n(v.when_at.trim()), note: n(v.note.trim()), tips_locked: !!v.tips_locked, updated_at: new Date().toISOString() };
       if (patch.winner && ![patch.p1, patch.p2].includes(patch.winner)) patch.winner = null;
       if (patch.status === 'done' && !patch.winner) throw new Error('Wybierz zwycięzcę, żeby zakończyć pojedynek.');
       await api.update('duels', { id: f.dataset.id }, patch); toast('Zapisano'); await refresh();
@@ -486,13 +526,16 @@ function rollPairs() {
 async function saveDraft() {
   const dr = S.draft; if (!dr?.pairs) return;
   if (!dr.name.trim()) return toast('Nadaj nazwę rundy.', 'err');
+  if (dr.pairs.some((p) => !p[0])) return toast('W każdej parze wybierz pierwszego zawodnika.', 'err');
+  const ids = dr.pairs.flatMap((p) => [p[0], p[1]]).filter(Boolean);
+  if (new Set(ids).size !== ids.length) return toast('Ktoś jest w dwóch parach naraz.', 'err');
   try {
     const ord = Math.max(0, ...S.data.rounds.map((r) => r.ord)) + 1;
     const [round] = await api.insert('rounds', { name: dr.name.trim(), ord });
     await api.insert('duels', dr.pairs.map((p, i) => p[1]
-      ? { round_id: round.id, ord: i, p1: p[0], p2: p[1], category_id: p[2], status: 'pending' }
+      ? { round_id: round.id, ord: i, p1: p[0], p2: p[1], category_id: p[2], status: dr.start === 'pending' ? 'pending' : 'live' }
       : { round_id: round.id, ord: i, p1: p[0], p2: null, status: 'done', winner: p[0], note: 'Wolny los — awans bez walki.' }));
-    S.draft = null; toast(`${round.name} rozlosowana!`); location.hash = '#/arena'; await refresh();
+    S.draft = null; toast(`${round.name} gotowa!`); location.hash = '#/arena'; await refresh();
   } catch (e) { toast(e.message, 'err'); }
 }
 function rollCategory() {

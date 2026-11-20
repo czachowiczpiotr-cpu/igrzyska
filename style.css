@@ -292,3 +292,22 @@ details.adm:not([open]) summary { margin-bottom: 0; }
   .featured { padding: 16px; }
   .modal { padding: 24px 16px 16px; }
 }
+
+/* v2: równoległe walki, finały, edytor par */
+.live-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 12px; }
+.live-grid .featured { margin: 0; }
+.finals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; margin: 10px 0 24px; }
+.finals .champ { margin: 0; }
+.champ.alt { border-color: rgba(140,160,255,.4); background: radial-gradient(80% 100% at 50% 0%, rgba(140,160,255,.16), var(--card) 70%); }
+.champ.alt .champ-glow { background: #8ca0ff; }
+.champ.alt .av { box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px #8ca0ff, 0 0 50px rgba(140,160,255,.5); }
+.typer-lead { display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin-bottom: 8px; border-color: rgba(140,160,255,.35); }
+.typer-lead .eyebrow { margin: 0; font-size: 11px; display: block; }
+.typer-lead b { font: 700 18px var(--display); }
+.typer-lead .tl-pts { margin-left: auto; color: #b9c4ff; font-size: 16px; }
+.mt-s { margin: 14px 0 0; }
+.pair.edit { display: grid; grid-template-columns: 16px 1fr auto 1fr auto; gap: 6px 8px; }
+.pair.edit select { padding: 8px 10px; font-size: 14px; }
+.pair.edit .pair-cat { grid-column: 2 / 5; }
+.pair.edit .btn { grid-row: 1; grid-column: 5; }
+.adm-row > .row-gap { gap: 4px; }

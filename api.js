@@ -2,6 +2,7 @@
 const TABLES = ['profiles', 'categories', 'rounds', 'duels', 'predictions'];
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now());
 
+const tipOpen = (d) => !!d && d.status !== 'done' && !d.tips_locked;
 function matches(row, m) { return Object.entries(m).every(([k, v]) => row[k] === v); }
 
 /* ---------------- Supabase ---------------- */
@@ -119,7 +120,7 @@ function demoApi() {
       rows = (Array.isArray(rows) ? rows : [rows]).map((r) => defaults(table, r));
       rows.forEach((r) => need(canWrite(table, r)));
       if (table === 'profiles') rows.forEach((r) => need(admin() || !r.is_player));
-      if (table === 'predictions') rows.forEach((r) => need(db.tables.duels.find((d) => d.id === r.duel_id)?.status === 'pending'));
+      if (table === 'predictions') rows.forEach((r) => need(tipOpen(db.tables.duels.find((d) => d.id === r.duel_id))));
       db.tables[table].push(...rows); save(); return rows;
     },
     async update(table, m, patch) {
@@ -130,7 +131,7 @@ function demoApi() {
     },
     async upsert(table, row) {
       const ex = db.tables[table].find((r) => sameKey(table, r, defaults(table, row)));
-      if (ex) { need(canWrite(table, ex)); if (table === 'predictions') need(db.tables.duels.find((d) => d.id === ex.duel_id)?.status === 'pending'); Object.assign(ex, row); save(); return [ex]; }
+      if (ex) { need(canWrite(table, ex)); if (table === 'predictions') need(tipOpen(db.tables.duels.find((d) => d.id === ex.duel_id))); Object.assign(ex, row); save(); return [ex]; }
       return this.insert(table, row);
     },
     async remove(table, m) {

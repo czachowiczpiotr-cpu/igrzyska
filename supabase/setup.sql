@@ -19,7 +19,7 @@ $$;
 -- Profile (imię i nazwisko + ksywa). Maila nie trzymamy publicznie.
 create table if not exists ig_profiles (
   id uuid primary key references auth.users on delete cascade,
-  full_name text not null check (char_length(full_name) between 2 and 60),
+  full_name text not null check (char_length(full_name) between 1 and 40),
   nickname text check (nickname is null or char_length(nickname) <= 30),
   is_player boolean not null default false,
   created_at timestamptz not null default now()
@@ -50,6 +50,7 @@ create table if not exists ig_duels (
   status text not null default 'pending' check (status in ('pending', 'live', 'done')),
   winner uuid references ig_profiles on delete set null,
   score1 text, score2 text, note text, when_at text,
+  tips_locked boolean not null default false,
   updated_at timestamptz not null default now()
 );
 
@@ -92,9 +93,9 @@ create policy ig_duel_write on ig_duels for all using (ig_is_admin()) with check
 
 create policy ig_pred_read on ig_predictions for select using (true);
 create policy ig_pred_ins on ig_predictions for insert with check (
-  user_id = auth.uid() and exists (select 1 from ig_duels d where d.id = duel_id and d.status = 'pending'));
+  user_id = auth.uid() and exists (select 1 from ig_duels d where d.id = duel_id and d.status <> 'done' and not d.tips_locked));
 create policy ig_pred_upd on ig_predictions for update using (user_id = auth.uid())
-  with check (user_id = auth.uid() and exists (select 1 from ig_duels d where d.id = duel_id and d.status = 'pending'));
+  with check (user_id = auth.uid() and exists (select 1 from ig_duels d where d.id = duel_id and d.status <> 'done' and not d.tips_locked));
 create policy ig_pred_del on ig_predictions for delete using (user_id = auth.uid() or ig_is_admin());
 
 -- Na żywo (realtime)
