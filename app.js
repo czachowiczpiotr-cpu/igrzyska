@@ -1,4 +1,4 @@
-import { makeApi } from './api.js?v=4';
+import { makeApi } from './api.js?v=5';
 
 const api = await makeApi();
 const S = {
@@ -15,6 +15,11 @@ const C = (id) => S.data.categories.find((c) => c.id === id);
 const R = (id) => S.data.rounds.find((r) => r.id === id);
 const D = (id) => S.data.duels.find((d) => d.id === id);
 const nm = (p) => (p ? p.nickname || p.full_name : 'TBA');
+// Bez maila: login z nazwy -> techniczny adres (nigdy nie dostaje poczty, potwierdzanie maili jest wyłączone).
+const LOGIN_DOMAIN = 'gracz.igrzyska.example.com';
+const slug = (t) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/Ł/g, 'L').toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '');
+const toEmail = (id) => { id = id.trim(); if (id.includes('@')) return id.toLowerCase(); const s = slug(id); if (!s) throw new Error('Wpisz nazwę albo e-mail.'); return `${s}@${LOGIN_DOMAIN}`; };
+const loginName = (email = '') => (email.endsWith('@' + LOGIN_DOMAIN) ? email.split('@')[0] : email);
 const sub = (p) => (p?.nickname ? p.full_name : '');
 const canTipOn = (d) => d && d.status !== 'done' && !d.tips_locked && d.p1 && d.p2;
 function tipRanking() {
@@ -233,7 +238,7 @@ function viewProfile() {
   const p = S.me || {};
   return `<section class="block narrow">
     <div class="block-head"><h2>Profil</h2></div>
-    <div class="profile-card spot">${av(S.me, 'lg')}<div><b>${esc(nm(S.me))}</b><small class="muted">${esc(S.user.email)}</small>${S.admin ? '<span class="badge gold">Admin</span>' : ''}${p.is_player ? '<span class="badge green">Zawodnik</span>' : '<span class="badge">Kibic</span>'}</div></div>
+    <div class="profile-card spot">${av(S.me, 'lg')}<div><b>${esc(nm(S.me))}</b><small class="muted">Login: ${esc(loginName(S.user.email))}</small>${S.admin ? '<span class="badge gold">Admin</span>' : ''}${p.is_player ? '<span class="badge green">Zawodnik</span>' : '<span class="badge">Kibic</span>'}</div></div>
     <form class="form" data-form="profile">
       <label>Imię i nazwisko lub ksywa<input name="full_name" required maxlength="40" value="${esc(nm(S.me) === 'TBA' ? '' : nm(S.me))}"></label>
       <button class="btn btn-gold">Zapisz</button>
@@ -331,8 +336,8 @@ function loginModal(m) {
   const tab = m.tab || 'in';
   return `<div class="seg full">${[['in', 'Logowanie'], ['up', 'Nowe konto']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="login-tab" data-t="${k}">${l}</button>`).join('')}</div>
   ${tab === 'in'
-    ? `<form class="form" data-form="signin"><label>E-mail<input name="email" type="email" required autocomplete="email"></label><label>Hasło<input name="password" type="password" required autocomplete="current-password"></label><button class="btn btn-gold">Wejdź na arenę</button>${api.mode === 'cloud' ? '<button type="button" class="link" data-act="forgot">Nie pamiętam hasła</button>' : ''}</form>`
-    : `<form class="form" data-form="signup"><label>Imię i nazwisko lub ksywa<input name="full_name" required maxlength="40" autocomplete="nickname" placeholder="np. Jan Kowalski albo Kowal"></label><label>E-mail<input name="email" type="email" required autocomplete="email"></label><label>Hasło <span class="muted">(min. 6 znaków)</span><input name="password" type="password" minlength="6" required autocomplete="new-password"></label><button class="btn btn-gold">Załóż konto</button></form>`}`;
+    ? `<form class="form" data-form="signin"><label>Nazwa lub e-mail<input name="email" required autocomplete="username" autocapitalize="none" placeholder="to, co podałeś przy rejestracji"></label><label>Hasło<input name="password" type="password" required autocomplete="current-password"></label><button class="btn btn-gold">Wejdź na arenę</button>${api.mode === 'cloud' ? '<button type="button" class="link" data-act="forgot">Nie pamiętam hasła</button>' : ''}</form>`
+    : `<form class="form" data-form="signup"><label>Imię i nazwisko lub ksywa<input name="full_name" required maxlength="40" autocomplete="nickname" placeholder="np. Jan Kowalski albo Kowal"></label><label>E-mail <span class="muted">(opcjonalnie — do odzyskania hasła; admini muszą podać)</span><input name="email" type="email" autocomplete="email"></label><label>Hasło <span class="muted">(min. 6 znaków)</span><input name="password" type="password" minlength="6" required autocomplete="new-password"></label><button class="btn btn-gold">Załóż konto</button></form>`}`;
 }
 
 function duelModal(d) {
@@ -422,6 +427,7 @@ document.addEventListener('click', async (e) => {
   if (a === 'forgot') {
     const email = app.querySelector('[data-form="signin"] [name="email"]').value.trim();
     if (!email) return toast('Wpisz najpierw e-mail.', 'err');
+    if (!email.includes('@')) return toast('Bez maila nie da się odzyskać hasła — napisz do Piotrka lub Olka.', 'err');
     return act(() => api.resetPassword(email), 'Wysłaliśmy link do zmiany hasła.');
   }
   if (a === 'tip') { e.preventDefault(); return act(() => api.upsert('predictions', { duel_id: id, user_id: S.user.id, pick: t.dataset.pick }), 'Typ zapisany'); }
@@ -468,11 +474,16 @@ document.addEventListener('submit', async (e) => {
   const done = () => { if (btn) btn.disabled = false; };
   const k = f.dataset.form;
   try {
-    if (k === 'signin') { await api.signIn(v); S.modal = null; toast('Witaj na arenie!'); await refresh(); }
+    if (k === 'signin') { await api.signIn({ email: toEmail(v.email), password: v.password }); S.modal = null; toast('Witaj na arenie!'); await refresh(); }
     if (k === 'signup') {
-      const r = await api.signUp({ ...v, full_name: v.full_name.trim(), nickname: null });
+      const name = v.full_name.trim(); if (!name) throw new Error('Wpisz imię i nazwisko lub ksywę.');
+      const email = v.email.trim() ? v.email.trim().toLowerCase() : toEmail(name);
+      let r;
+      try { r = await api.signUp({ email, password: v.password, full_name: name, nickname: null }); }
+      catch (err) { if (!v.email.trim() && /już konto/.test(err.message)) throw new Error('Ta nazwa jest już zajęta — dopisz coś (np. inicjał) albo zaloguj się.'); throw err; }
+      if (!v.email.trim()) toast(`Zapamiętaj: logujesz się nazwą „${name}” i hasłem.`);
       S.modal = null;
-      toast(r.needsConfirm ? 'Sprawdź skrzynkę i kliknij link, żeby aktywować konto.' : 'Konto założone. Witaj!');
+      if (v.email.trim() || r.needsConfirm) toast(r.needsConfirm ? 'Sprawdź skrzynkę i kliknij link, żeby aktywować konto.' : 'Konto założone. Witaj!');
       await refresh();
     }
     if (k === 'profile') {
