@@ -106,3 +106,9 @@ do $$ begin
   begin alter publication supabase_realtime add table ig_duels; exception when others then null; end;
   begin alter publication supabase_realtime add table ig_predictions; exception when others then null; end;
 end $$;
+
+-- Dostęp przez API (nowe projekty nie dają go automatycznie); RLS dalej pilnuje, kto co może.
+grant usage on schema public to anon, authenticated;
+grant select on ig_profiles, ig_categories, ig_rounds, ig_duels, ig_predictions to anon, authenticated;
+grant insert, update, delete on ig_profiles, ig_categories, ig_rounds, ig_duels, ig_predictions to authenticated;
+grant execute on function ig_is_admin() to anon, authenticated;

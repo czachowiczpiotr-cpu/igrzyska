@@ -1,4 +1,4 @@
-import { makeApi } from './api.js';
+import { makeApi } from './api.js?v=4';
 
 const api = await makeApi();
 const S = {
@@ -69,8 +69,9 @@ async function refresh() {
     S.user = await api.session();
     S.admin = S.user ? await api.isAdmin() : false;
     S.me = S.user ? P(S.user.id) || null : null;
-    if (S.user && !S.me && S.user.meta?.ig_full_name) {
-      try { await api.insert('profiles', { id: S.user.id, full_name: S.user.meta.ig_full_name, nickname: S.user.meta.ig_nickname || null }); S.data = await api.load(); S.me = P(S.user.id); } catch (e) { console.warn(e); }
+    if (S.user && !S.me && S.user.meta?.ig_full_name && !S.creatingProfile) {
+      S.creatingProfile = true;
+      try { await api.insert('profiles', { id: S.user.id, full_name: S.user.meta.ig_full_name, nickname: S.user.meta.ig_nickname || null }); S.data = await api.load(); S.me = P(S.user.id); } catch (e) { console.warn(e); } finally { S.creatingProfile = false; }
     }
   } catch (e) { toast('Nie udało się wczytać danych: ' + e.message, 'err'); }
   S.loading = false;
