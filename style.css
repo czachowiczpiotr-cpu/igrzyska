@@ -312,3 +312,24 @@ details.adm:not([open]) summary { margin-bottom: 0; }
 .pair.edit .btn { grid-row: 1; grid-column: 5; }
 .adm-row > .row-gap { gap: 4px; }
 .fmt { margin: -6px 0 14px; padding: 10px 12px; border-radius: 10px; background: rgba(246,196,83,.05); border: 1px solid rgba(246,196,83,.18); }
+
+/* v3: drabinka pucharowa */
+.bracket { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(230px, 1fr); gap: 32px; overflow-x: auto; padding-bottom: 10px; margin-inline: -16px; padding-inline: 16px; scroll-padding-inline: 16px; scroll-snap-type: x proximity; }
+.br-col { display: flex; flex-direction: column; min-width: 0; scroll-snap-align: start; }
+.br-cards { flex: 1; display: flex; flex-direction: column; justify-content: space-around; gap: 12px; }
+.br-slot { position: relative; }
+.br-col:not(.trophy-col) .br-slot::after { content: ''; position: absolute; top: 50%; right: -33px; width: 32px; border-top: 1px solid var(--line2); }
+.br-col:not(:first-child) .br-slot::before { content: ''; position: absolute; top: 50%; left: -16px; width: 16px; border-top: 1px solid var(--line2); }
+.ghost-card { background: transparent; border: 1px dashed var(--line2); box-shadow: none; cursor: default; }
+.ghost-card:hover { transform: none; }
+.ghost-av { background: rgba(255,255,255,.06); color: var(--dim); box-shadow: none; }
+.trophy { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 22px 12px; text-align: center; border-style: dashed; }
+.trophy.won { border-style: solid; border-color: rgba(246,196,83,.5); background: radial-gradient(80% 100% at 50% 0%, rgba(246,196,83,.16), var(--card) 70%); }
+.trophy-ico { font-size: 34px; filter: drop-shadow(0 0 14px rgba(246,196,83,.5)); }
+.trophy b { font-family: var(--display); }
+.next-br { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 14px; border-radius: 12px; border: 1px solid rgba(246,196,83,.45); background: rgba(246,196,83,.07); }
+.next-br > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pool-item.st-baraz::after { content: '↺'; color: var(--gold); margin-left: 2px; }
+.pool-item.st-out:not(.on) { opacity: .28; }
+.warn { color: var(--gold); margin: -4px 0 12px; }
+@media (max-width: 760px) { .bracket { grid-auto-columns: 78%; } }

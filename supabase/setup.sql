@@ -37,6 +37,7 @@ create table if not exists ig_rounds (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   ord int not null default 0,
+  bracket boolean not null default false, -- runda drabinki pucharowej (ćwierćfinały → finał)
   created_at timestamptz not null default now()
 );
 
@@ -112,3 +113,6 @@ grant usage on schema public to anon, authenticated;
 grant select on ig_profiles, ig_categories, ig_rounds, ig_duels, ig_predictions to anon, authenticated;
 grant insert, update, delete on ig_profiles, ig_categories, ig_rounds, ig_duels, ig_predictions to authenticated;
 grant execute on function ig_is_admin() to anon, authenticated;
+
+-- Migracja 2026-11-25 (dla istniejącej bazy):
+alter table ig_rounds add column if not exists bracket boolean not null default false;
