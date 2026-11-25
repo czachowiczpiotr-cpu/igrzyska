@@ -1,4 +1,4 @@
-import { makeApi } from './api.js?v=9';
+import { makeApi } from './api.js?v=10';
 
 const api = await makeApi();
 const S = {
@@ -34,7 +34,7 @@ const hue = (id = '') => [...id].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 3
 const initials = (p) => (p ? (p.nickname || p.full_name).split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase() : '?');
 const av = (p, cls = '') => `<span class="av ${cls}" style="--h:${p ? hue(p.id) : 0}">${p ? esc(initials(p)) : '?'}</span>`;
 const shuffle = (a) => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-const rounds = () => [...S.data.rounds].sort((a, b) => a.ord - b.ord || a.created_at.localeCompare(b.created_at));
+const rounds = () => [...S.data.rounds].sort((a, b) => (!!a.bracket - !!b.bracket) || a.ord - b.ord || a.created_at.localeCompare(b.created_at));
 const duelsOf = (rid) => S.data.duels.filter((d) => d.round_id === rid).sort((a, b) => a.ord - b.ord);
 const players = () => S.data.profiles.filter((p) => p.is_player);
 const isBye = (d) => !!d.p1 !== !!d.p2;
@@ -58,9 +58,14 @@ function status(pid) {
   const rs = rounds();
   for (let i = rs.length - 1; i >= 0; i--) {
     const d = duelsOf(rs[i].id).find((x) => x.p1 === pid || x.p2 === pid);
-    if (d) return loserOf(d) === pid ? (i === 0 && rs.length === 1 ? 'baraz' : 'out') : 'in';
+    if (d) return loserOf(d) === pid ? (i === 0 && !rs[0].bracket && bracketHasSpace() ? 'baraz' : 'out') : 'in';
   }
   return 'in';
+}
+// czy w 1. rundzie drabinki są jeszcze wolne miejsca (przegrani z 1. rundy mogą wrócić)
+function bracketHasSpace() {
+  const f = rounds().find((r) => r.bracket); if (!f) return true;
+  return duelsOf(f.id).some((d) => !d.p1 || !d.p2);
 }
 const isPow2 = (n) => n >= 1 && (n & (n - 1)) === 0;
 const bracketName = (duels) => (duels === 1 ? 'Finał' : duels === 2 ? 'Półfinały' : duels === 4 ? 'Ćwierćfinały' : duels === 8 ? '1/8 finału' : `Runda ${S.data.rounds.length + 1}`);
@@ -115,7 +120,7 @@ function toast(msg, kind = 'ok') {
 }
 
 /* ---------- views ---------- */
-const NAV = [['arena', 'Arena'], ['zawodnicy', 'Zawodnicy'], ['kategorie', 'Kategorie'], ['typy', 'Typy']];
+const NAV = [['arena', 'Arena'], ['drabinka', 'Drabinka'], ['zawodnicy', 'Zawodnicy'], ['typy', 'Typy'], ['kategorie', 'Kategorie']];
 
 function header() {
   const nav = [...NAV, ...(S.admin ? [['admin', 'Panel']] : [])];
@@ -128,15 +133,15 @@ function header() {
   </header>${api.mode === 'demo' ? `<div class="demo-bar">Tryb demo — dane zapisują się tylko w tej przeglądarce.</div>` : ''}`;
 }
 
-function duelMini(d) {
+function duelMini(d, labels = []) {
   const a = P(d.p1), b = P(d.p2), c = C(d.category_id);
-  const row = (p, pid, score) => {
+  const row = (p, pid, score, lab) => {
     const win = d.status === 'done' && d.winner && d.winner === pid, lose = d.status === 'done' && d.winner && pid && d.winner !== pid;
-    return `<div class="dm-row ${win ? 'win' : ''} ${lose ? 'lose' : ''}">${av(p, 'xs')}<span class="dm-name">${pid ? esc(nm(p)) : '<em>wolny los</em>'}</span>${score ? `<span class="dm-score">${esc(score)}</span>` : ''}${win ? '<span class="crown">♛</span>' : ''}</div>`;
+    return `<div class="dm-row ${win ? 'win' : ''} ${lose ? 'lose' : ''}">${av(p, 'xs')}<span class="dm-name">${pid ? esc(nm(p)) : `<em>${isBye(d) && d.status === 'done' ? 'wolny los' : esc(lab || 'do ustalenia')}</em>`}</span>${score ? `<span class="dm-score">${esc(score)}</span>` : ''}${win ? '<span class="crown">♛</span>' : ''}</div>`;
   };
   return `<button class="duel-mini spot ${d.status}" data-act="duel" data-id="${d.id}">
-    ${row(a, d.p1, d.score1)}${row(b, d.p2, d.score2)}
-    <div class="dm-foot">${isBye(d) ? '<span class="muted">Awans bez walki</span>' : c ? `<span class="cat-chip">${esc(c.emoji || '•')} ${esc(c.name)}</span>` : '<span class="muted">Kategoria: ?</span>'}
+    ${row(a, d.p1, d.score1, labels[0])}${row(b, d.p2, d.score2, labels[1])}
+    <div class="dm-foot">${isBye(d) && d.status === 'done' ? '<span class="muted">Awans bez walki</span>' : !d.p1 && !d.p2 ? `<span class="muted">${S.admin ? 'kliknij, żeby wpisać osoby' : 'czeka na zawodników'}</span>` : c ? `<span class="cat-chip">${esc(c.emoji || '•')} ${esc(c.name)}</span>` : '<span class="muted">Kategoria: ?</span>'}
     ${d.status === 'live' ? '<span class="live-tag">TRWA</span>' : d.when_at && d.status === 'pending' ? `<span class="muted">${esc(d.when_at)}</span>` : ''}</div>
   </button>`;
 }
@@ -147,7 +152,10 @@ function viewArena() {
   const played = S.data.duels.filter((d) => d.status === 'done' && !isBye(d)).length;
   const unused = S.data.categories.filter((c) => !usedCatIds().has(c.id));
   const nx = nextDuel();
-  const live = rounds().flatMap((r) => duelsOf(r.id)).filter((d) => d.status === 'live');
+  const allD = rounds().flatMap((r) => duelsOf(r.id));
+  const live = allD.filter((d) => d.status === 'live');
+  const upcoming = allD.filter((d) => d.status === 'pending' && d.p1 && d.p2).slice(0, 6);
+  const recent = allD.filter((d) => d.status === 'done' && d.p1 && d.p2).sort((x, y) => (y.updated_at || '').localeCompare(x.updated_at || '')).slice(0, 4);
   const champ = ch ? P(ch) : null;
   return `
   <section class="hero">
@@ -162,17 +170,26 @@ function viewArena() {
     </div>
   </section>
   ${champ ? finals(champ) : ''}
-  ${live.length ? `<section class="block"><div class="block-head"><h2>Trwa teraz <span class="muted">${live.length}</span></h2></div><div class="live-grid">${live.map(featured).join('')}</div></section>` : nx ? featured(nx) : ''}
+  ${live.length ? `<section class="block"><div class="block-head"><h2>Trwa teraz <span class="muted">${live.length}</span></h2><a class="btn ghost sm" href="#/drabinka">Drabinka →</a></div><div class="live-grid">${live.map(featured).join('')}</div></section>` : rs.length ? `<section class="block"><div class="block-head"><h2>Trwa teraz</h2><a class="btn ghost sm" href="#/drabinka">Drabinka →</a></div><div class="empty spot"><p class="muted">W tej chwili nie trwa żadna walka.</p></div></section>` : ''}
+  ${upcoming.length ? `<section class="block"><div class="block-head"><h2>Następne walki</h2></div><div class="grid duels-open">${upcoming.map((d) => duelMini(d)).join('')}</div></section>` : ''}
+  ${recent.length ? `<section class="block"><div class="block-head"><h2>Ostatnie wyniki</h2></div><div class="grid duels-open">${recent.map((d) => duelMini(d)).join('')}</div></section>` : ''}
   ${rs.length ? '' : `<section class="block"><div class="empty spot"><div class="empty-ico">⚔︎</div><h3>Igrzyska jeszcze się nie zaczęły</h3><p class="muted">${ps.length ? `${ps.length} zawodników czeka na 1. rundę.` : 'Najpierw zapiszcie się i poczekajcie, aż admin doda was jako zawodników.'}</p>${S.admin ? `<a class="btn btn-gold" href="#/admin">Ułóż 1. rundę</a>` : ''}</div></section>`}
-  ${elimView()}
-  ${bracketView()}
   ${unused.length ? `<section class="marquee" aria-label="Kategorie w puli"><div class="mq-track">${[...unused, ...unused].map((c) => `<span>${esc(c.emoji || '◆')} ${esc(c.name)}</span>`).join('')}</div></section>` : ''}`;
+}
+
+function viewBracketPage() {
+  const br = bracketRounds(), r1 = rounds().find((r) => !r.bracket);
+  const r1done = r1 && duelsOf(r1.id).length && duelsOf(r1.id).every((d) => d.status === 'done');
+  return `${S.admin ? `<div class="admin-strip spot"><span class="dot-admin"></span><span class="muted small">Admin: kliknij dowolną walkę w drabince, żeby wpisać lub zmienić osoby, kategorię i wynik. Zwycięzca sam przechodzi dalej.</span>
+      <span class="row-gap">${!br.length ? '<button class="btn btn-gold sm" data-act="bracket-create">Rozrysuj drabinkę (8 osób)</button>' : ''}${r1done ? '<button class="btn ghost sm" data-act="bracket-fill">🎲 Wpisz zwycięzców 1. rundy losowo</button>' : ''}<a class="btn ghost sm" href="#/admin">Rundy dodatkowe / baraże</a></span></div>` : ''}
+  ${bracketView()}
+  ${elimView()}`;
 }
 
 function elimView() {
   const el = rounds().filter((r) => !r.bracket); if (!el.length) return '';
   return `<section class="block">
-    <div class="block-head"><h2>Eliminacje</h2>${S.admin ? `<a class="btn ghost sm" href="#/admin">Panel rund</a>` : ''}</div>
+    <div class="block-head"><h2>Eliminacje</h2><span class="muted small">1. runda i ewentualne rundy dodatkowe</span></div>
     <div class="rounds" id="rounds">${el.map((r) => {
       const ds = duelsOf(r.id), done = ds.filter((d) => d.status === 'done').length;
       return `<div class="round"><div class="round-head"><h3>${esc(r.name)}</h3><span class="pill">${done}/${ds.length}</span></div>${ds.map(duelMini).join('')}</div>`;
@@ -182,18 +199,18 @@ function elimView() {
 
 function bracketView() {
   const br = bracketRounds();
-  if (!br.length && players().length < 4) return '';
-  const first = br.length ? duelsOf(br[0].id).length : Math.min(4, 2 ** Math.floor(Math.log2(Math.max(2, players().length) / 2)));
+  const first = br.length ? duelsOf(br[0].id).length : 4;
   const cols = []; let n = first, k = 0;
   while (n >= 1) { cols.push({ r: br[k], n }); n = n / 2; k++; if (!isPow2(first)) break; }
   const ghost = (txt1, txt2) => `<div class="duel-mini ghost-card"><div class="dm-row"><span class="av xs ghost-av">?</span><span class="dm-name muted">${txt1}</span></div><div class="dm-row"><span class="av xs ghost-av">?</span><span class="dm-name muted">${txt2}</span></div></div>`;
   const ch = champion() && br.length && duelsOf(br[br.length - 1].id).length === 1 ? P(champion()) : null;
   return `<section class="block">
-    <div class="block-head"><h2>Drabinka</h2><span class="muted small">${br.length ? 'puchar — przegrany odpada' : 'ósemka ustali się po eliminacjach'}</span></div>
+    <div class="block-head"><h2>Drabinka</h2><span class="muted small">${br.length ? 'puchar — przegrany odpada' : 'ósemka ustali się po 1. rundzie'}</span></div>
     <div class="bracket" id="bracket">${cols.map((c, ci) => {
       const ds = c.r ? duelsOf(c.r.id) : [];
+      const labs = (j) => (ci === 0 ? ['Miejsce w ósemce', 'Miejsce w ósemce'] : [`Zwycięzca walki ${2 * j + 1}`, `Zwycięzca walki ${2 * j + 2}`]);
       const slots = Array.from({ length: Math.max(c.n, ds.length) }, (_, j) => ds[j]
-        ? duelMini(ds[j])
+        ? duelMini(ds[j], labs(j))
         : ci === 0 ? ghost('Miejsce w ósemce', 'Miejsce w ósemce') : ghost(`Zwycięzca walki ${2 * j + 1}`, `Zwycięzca walki ${2 * j + 2}`));
       return `<div class="br-col"><div class="round-head"><h3>${esc(c.r?.name || bracketName(c.n))}</h3>${c.r ? `<span class="pill">${ds.filter((d) => d.status === 'done').length}/${ds.length}</span>` : '<span class="pill">wkrótce</span>'}</div><div class="br-cards">${slots.map((h) => `<div class="br-slot">${h}</div>`).join('')}</div></div>`;
     }).join('')}
@@ -319,7 +336,7 @@ function viewAdmin() {
   const dr = ensureDraft(), rs = rounds(), nb = nextBracket();
   if (!dr.custom && !dr.pairs && !dr.srcTouched) dr.source = defaultSource();
   if (!dr.custom && !dr.pairs) { dr.pool = new Set(poolFor(dr.source)); if (!dr.named) dr.name = suggestName(dr.source, dr.pool.size); }
-  const isBr = dr.bracket ?? (isPow2(dr.pool.size) && dr.pool.size >= 2 && !dr.source.startsWith('l:'));
+  const isBr = dr.bracket ?? (!bracketRounds().length && isPow2(dr.pool.size) && dr.pool.size >= 2 && !dr.source.startsWith('l:'));
   const sources = [['alive', 'Wszyscy, którzy są jeszcze w grze'], ['all', 'Wszyscy zawodnicy'], ...rs.flatMap((r) => [['w:' + r.id, `Zwycięzcy: ${r.name}`], ['l:' + r.id, `Przegrani: ${r.name}`]])];
   const people = [...S.data.profiles].sort((a, b) => b.is_player - a.is_player || nm(a).localeCompare(nm(b), 'pl'));
   return `<section class="block">
@@ -328,7 +345,7 @@ function viewAdmin() {
     <div class="panel spot">
       <h3>🎲 Nowa runda</h3>
       ${nb ? `<div class="next-br"><div><b>${esc(nb.name)} wg drabinki</b><span class="muted small">${nb.pairs.map((p) => `${esc(nm(P(p[0])))} vs ${esc(nm(P(p[1])))}`).join(' · ')}</span></div><button class="btn btn-gold sm" data-act="draft-bracket">Przygotuj →</button></div>` : ''}
-      <p class="muted small fmt">Format: drabinka (puchar), przegrany odpada. Po 1. rundzie zostaje 6 osób, a 2 miejsca w ósemce dobieracie tak, jak zdecyduje Olek: zaznaczcie je niżej ręcznie (dzika karta) albo zróbcie rundę dodatkową — „Kto wchodzi” → „Przegrani: Runda 1”. Półfinały i finał tworzą się jednym klikiem wg drabinki.</p>
+      <p class="muted small fmt">Format: drabinka (puchar), przegrany odpada. Tu układacie 1. rundę i ewentualne rundy dodatkowe/baraże. Po 1. rundzie zwycięzcy same wpiszą się losowo do drabinki; 2 wolne miejsca uzupełniacie w zakładce Drabinka (kliknij walkę) — ręcznie albo po barażu.</p>
       <label class="lbl">Kto wchodzi do rundy<select data-act="draft-source">${sources.map(([v, l]) => `<option value="${v}" ${dr.source === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
       <div class="pool">${players().map((p) => `<label class="pool-item ${dr.pool.has(p.id) ? 'on' : ''} st-${status(p.id)}" title="${{ in: 'w grze', baraz: 'może wrócić', out: 'odpadł(a)', champ: 'mistrz' }[status(p.id)]}"><input type="checkbox" data-act="draft-pool" value="${p.id}" ${dr.pool.has(p.id) ? 'checked' : ''}>${av(p, 'xs')}${esc(nm(p))}</label>`).join('') || '<p class="muted">Najpierw oznacz zawodników w liście „Ludzie”.</p>'}</div>
       <p class="muted small">${plural(dr.pool.size, 'osoba', 'osoby', 'osób')} → ${plural(Math.floor(dr.pool.size / 2), 'pojedynek', 'pojedynki', 'pojedynków')}${dr.pool.size % 2 ? ' + 1 wolny los' : ''}</p>
@@ -393,7 +410,7 @@ function duelModal(d) {
   const preds = predsOf(d.id), mine = S.user && preds.find((p) => p.user_id === S.user.id);
   const n1 = preds.filter((p) => p.pick === d.p1).length, n2 = preds.filter((p) => p.pick === d.p2).length, tot = n1 + n2;
   const pct1 = tot ? Math.round((n1 / tot) * 100) : 50;
-  const side = (p, pid, score) => `<div class="vs-side ${d.status === 'done' && d.winner === pid ? 'winner' : d.status === 'done' && d.winner ? 'loser' : ''}">${d.status === 'done' && d.winner === pid ? '<span class="crown big">♛</span>' : ''}${av(p, 'lg')}<b>${pid ? esc(nm(p)) : 'wolny los'}</b><small>${esc(sub(p))}</small>${score ? `<span class="score">${esc(score)}</span>` : ''}</div>`;
+  const side = (p, pid, score) => `<div class="vs-side ${d.status === 'done' && d.winner === pid ? 'winner' : d.status === 'done' && d.winner ? 'loser' : ''}">${d.status === 'done' && d.winner === pid ? '<span class="crown big">♛</span>' : ''}${av(p, 'lg')}<b>${pid ? esc(nm(p)) : isBye(d) && d.status === 'done' ? 'wolny los' : 'do ustalenia'}</b><small>${esc(sub(p))}</small>${score ? `<span class="score">${esc(score)}</span>` : ''}</div>`;
   const canTip = S.user && canTipOn(d);
   return `<p class="eyebrow">${esc(r?.name || '')} · ${d.status === 'live' ? '<span class="live-tag">TRWA</span>' : d.status === 'done' ? 'Zakończony' : 'Oczekuje'}${d.when_at ? ' · ' + esc(d.when_at) : ''}</p>
   <div class="vs modal-vs">${side(a, d.p1, d.score1)}<div class="vs-mid"><span>VS</span></div>${side(b, d.p2, d.score2)}</div>
@@ -440,7 +457,7 @@ function render() {
   S.dirty = false;
   const sc = document.getElementById('rounds')?.scrollLeft || 0;
   const sb = document.getElementById('bracket')?.scrollLeft || 0;
-  const views = { arena: viewArena, zawodnicy: viewPlayers, kategorie: viewCategories, typy: viewTips, admin: viewAdmin, profil: viewProfile };
+  const views = { arena: viewArena, drabinka: viewBracketPage, zawodnicy: viewPlayers, kategorie: viewCategories, typy: viewTips, admin: viewAdmin, profil: viewProfile };
   const v = views[S.route] || viewArena;
   app.innerHTML = header() + `<main>${S.loading ? '<div class="loader"><span></span></div>' : v()}</main><footer class="foot">Igrzyska · zrobione dla ekipy</footer>` + modalHtml();
   const rEl = document.getElementById('rounds'); if (rEl) rEl.scrollLeft = sc;
@@ -497,6 +514,8 @@ document.addEventListener('click', async (e) => {
   if (a === 'roll-cat') return rollCategory();
   if (a === 'draft-roll') return rollPairs();
   if (a === 'draft-save') return saveDraft();
+  if (a === 'bracket-create') return act(() => createBracket(), 'Drabinka rozrysowana');
+  if (a === 'bracket-fill') { if (!confirm('Wpisać losowo zwycięzców 1. rundy do ćwierćfinałów? Obecne osoby w ćwierćfinałach zostaną zastąpione.')) return; return act(() => fillBracketFromR1(true), 'Zwycięzcy wpisani do drabinki'); }
   if (a === 'draft-bracket') { const nb = nextBracket(); if (!nb) return; S.draft = { source: 'w:' + nb.from.id, pool: new Set(nb.pairs.flat().filter(Boolean)), name: nb.name, named: true, randomCats: true, start: 'live', pairs: nb.pairs, bracket: true, custom: true, srcTouched: true }; assignCats(S.draft.pairs); return render(); }
   if (a === 'draft-manual') { const dr = ensureDraft(); const ids = [...dr.pool]; const pairs = []; for (let i = 0; i < Math.max(ids.length, 2); i += 2) pairs.push([ids[i] || null, ids[i + 1] || null, null]); if (dr.randomCats) assignCats(pairs); dr.pairs = pairs; return render(); }
   if (a === 'pair-add') { S.draft.pairs.push([null, null, null]); return render(); }
@@ -572,7 +591,16 @@ document.addEventListener('submit', async (e) => {
         patch.category_id = ex ? ex.id : (await api.insert('categories', nc))[0].id;
       }
       if (patch.status === 'done' && !patch.winner) throw new Error('Wybierz zwycięzcę, żeby zakończyć pojedynek.');
-      await api.update('duels', { id: f.dataset.id }, patch); toast('Zapisano'); await refresh();
+      const old = { ...D(f.dataset.id) };
+      await api.update('duels', { id: f.dataset.id }, patch);
+      await advance({ ...old, ...patch }, old);
+      S.data = await api.load();
+      const r1 = rounds().find((r) => !r.bracket);
+      if (r1 && old.round_id === r1.id && duelsOf(r1.id).every((d) => d.status === 'done')) {
+        const placed = await fillBracketFromR1(false);
+        if (placed) toast(`Koniec 1. rundy — ${placed} zwycięzców wpisanych losowo do drabinki`); else toast('Zapisano');
+      } else toast('Zapisano');
+      await refresh();
     }
   } catch (err) { toast(err.message || String(err), 'err'); }
   done();
@@ -583,6 +611,42 @@ function parseCatLine(l) {
   const emoji = m?.[1] || null; const rest = (m?.[2] || l).trim();
   const [name, ...desc] = rest.split(/\s+[—–-]\s+/);
   return { emoji, name: name.trim().slice(0, 80), description: desc.join(' — ').trim() || null };
+}
+
+/* ---------- drabinka ---------- */
+async function createBracket(size = 8) {
+  const ord0 = Math.max(1000, ...S.data.rounds.map((r) => r.ord)) + 1;
+  for (let n = size / 2, k = 0; n >= 1; n /= 2, k++) {
+    const [r] = await api.insert('rounds', { name: bracketName(n), ord: ord0 + k, bracket: true });
+    await api.insert('duels', Array.from({ length: n }, (_, i) => ({ round_id: r.id, ord: i, status: 'pending' })));
+  }
+  S.data = await api.load();
+}
+// Zwycięzcy 1. rundy → losowo do ćwierćfinałów; wolne miejsca rozkładane po różnych walkach.
+async function fillBracketFromR1(force) {
+  const r1 = rounds().find((r) => !r.bracket); if (!r1) return 0;
+  const winners = duelsOf(r1.id).filter((d) => d.status === 'done' && d.winner).map((d) => d.winner);
+  if (!bracketRounds().length) await createBracket(8);
+  const qf = duelsOf(bracketRounds()[0].id);
+  if (!force && qf.some((d) => d.p1 || d.p2)) return 0; // już ktoś wpisany — nie ruszamy
+  const w = shuffle(winners); const slots = [];
+  qf.forEach((d) => slots.push([d, 'p1']));
+  qf.forEach((d) => slots.push([d, 'p2'])); // najpierw po jednym w każdej walce, potem drugie miejsca
+  const patches = new Map(qf.map((d) => [d.id, { p1: null, p2: null, winner: null }]));
+  slots.slice(0, w.length).forEach(([d, k], i) => (patches.get(d.id)[k] = w[i]));
+  for (const d of qf) if (d.status !== 'done') await api.update('duels', { id: d.id }, patches.get(d.id));
+  return Math.min(w.length, slots.length);
+}
+// zwycięzca walki drabinki przechodzi na swoje miejsce w następnej rundzie
+async function advance(d, old) {
+  const r = R(d.round_id); if (!r?.bracket) return;
+  const br = bracketRounds(); const i = br.findIndex((x) => x.id === r.id); const nxt = br[i + 1]; if (!nxt) return;
+  const j = duelsOf(r.id).findIndex((x) => x.id === d.id); const t = duelsOf(nxt.id)[Math.floor(j / 2)];
+  if (!t || t.status === 'done') return;
+  const key = j % 2 === 0 ? 'p1' : 'p2';
+  const val = d.status === 'done' ? d.winner : null;
+  if (!val && t[key] !== old.winner) return;
+  if (t[key] !== val) await api.update('duels', { id: t.id }, { [key]: val });
 }
 
 /* ---------- losowania ---------- */
@@ -613,7 +677,7 @@ async function saveDraft() {
   if (new Set(ids).size !== ids.length) return toast('Ktoś jest w dwóch parach naraz.', 'err');
   try {
     const ord = Math.max(0, ...S.data.rounds.map((r) => r.ord)) + 1;
-    const isBr = dr.bracket ?? (isPow2(ids.length) && ids.length >= 2 && !dr.source.startsWith('l:'));
+    const isBr = dr.bracket ?? (!bracketRounds().length && isPow2(ids.length) && ids.length >= 2 && !dr.source.startsWith('l:'));
     const [round] = await api.insert('rounds', isBr ? { name: dr.name.trim(), ord, bracket: true } : { name: dr.name.trim(), ord });
     await api.insert('duels', dr.pairs.map((p, i) => p[1]
       ? { round_id: round.id, ord: i, p1: p[0], p2: p[1], category_id: p[2], status: dr.start === 'pending' ? 'pending' : 'live' }
