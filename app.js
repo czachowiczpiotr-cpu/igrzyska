@@ -1,4 +1,4 @@
-import { makeApi } from './api.js?v=8';
+import { makeApi } from './api.js?v=9';
 
 const api = await makeApi();
 const S = {
@@ -279,9 +279,9 @@ function viewProfile() {
   const p = S.me || {};
   return `<section class="block narrow">
     <div class="block-head"><h2>Profil</h2></div>
-    <div class="profile-card spot">${av(S.me, 'lg')}<div><b>${esc(nm(S.me))}</b><small class="muted">Login: ${esc(loginName(S.user.email))}</small>${S.admin ? '<span class="badge gold">Admin</span>' : ''}${p.is_player ? '<span class="badge green">Zawodnik</span>' : '<span class="badge">Kibic</span>'}</div></div>
+    <div class="profile-card spot">${av(S.me, 'lg')}<div><b>${esc(nm(S.me))}</b><small class="muted">Logujesz się: ${S.user.email.endsWith('@' + LOGIN_DOMAIN) ? 'nazwą „' + esc(loginName(S.user.email)) + '”' : 'mailem ' + esc(S.user.email)}</small>${S.admin ? '<span class="badge gold">Admin</span>' : ''}${p.is_player ? '<span class="badge green">Zawodnik</span>' : '<span class="badge">Kibic</span>'}</div></div>
     <form class="form" data-form="profile">
-      <label>Imię i nazwisko lub ksywa<input name="full_name" required maxlength="40" value="${esc(nm(S.me) === 'TBA' ? '' : nm(S.me))}"></label>
+      <label>Nazwa<input name="full_name" required maxlength="40" value="${esc(nm(S.me) === 'TBA' ? '' : nm(S.me))}"></label>
       <button class="btn btn-gold">Zapisz</button>
     </form>
     <form class="form" data-form="password"><label>Nowe hasło<input name="password" type="password" minlength="6" required autocomplete="new-password"></label><button class="btn ghost">Zmień hasło</button></form>
@@ -370,7 +370,7 @@ function modalHtml() {
   const m = S.modal; if (!m) return '';
   let body = '';
   if (m.type === 'login') body = loginModal(m);
-  if (m.type === 'profile-setup') body = `<h2>Jeszcze jedno</h2><p class="muted">Jak mamy cię wyświetlać?</p><form class="form" data-form="profile"><label>Imię i nazwisko lub ksywa<input name="full_name" required maxlength="40"></label><button class="btn btn-gold">Gotowe</button></form>`;
+  if (m.type === 'profile-setup') body = `<h2>Jeszcze jedno</h2><p class="muted">Jak mamy cię wyświetlać?</p><form class="form" data-form="profile"><label>Nazwa<input name="full_name" required maxlength="40"></label><button class="btn btn-gold">Gotowe</button></form>`;
   if (m.type === 'duel') body = duelModal(D(m.id));
   if (m.type === 'cat') body = catModal(m.id ? C(m.id) : null);
   if (m.type === 'cat-bulk') body = `<h2>Wklej listę kategorii</h2><p class="muted small">Jedna kategoria w linii. Format: <code>emoji Nazwa — opis</code> (emoji i opis opcjonalne).</p><form class="form" data-form="cat-bulk"><textarea name="txt" rows="10" placeholder="🎂 Kto upiecze lepsze ciasto — ocenia jury&#10;👟 Kto zrobi więcej kroków — w ciągu jednego dnia"></textarea><button class="btn btn-gold">Dodaj wszystkie</button></form>`;
@@ -384,7 +384,7 @@ function loginModal(m) {
   return `<div class="seg full">${[['in', 'Logowanie'], ['up', 'Nowe konto']].map(([k, l]) => `<button class="${tab === k ? 'on' : ''}" data-act="login-tab" data-t="${k}">${l}</button>`).join('')}</div>
   ${tab === 'in'
     ? `<form class="form" data-form="signin"><label>Nazwa lub e-mail<input name="email" required autocomplete="username" autocapitalize="none" placeholder="to, co podałeś przy rejestracji"></label><label>Hasło<input name="password" type="password" required autocomplete="current-password"></label><button class="btn btn-gold">Wejdź na arenę</button>${api.mode === 'cloud' ? '<button type="button" class="link" data-act="forgot">Nie pamiętam hasła</button>' : ''}</form>`
-    : `<form class="form" data-form="signup"><label>Imię i nazwisko lub ksywa<input name="full_name" required maxlength="40" autocomplete="nickname" placeholder="np. Jan Kowalski albo Kowal"></label><label>E-mail <span class="muted">(opcjonalnie — do odzyskania hasła; admini muszą podać)</span><input name="email" type="email" autocomplete="email"></label><label>Hasło <span class="muted">(min. 6 znaków)</span><input name="password" type="password" minlength="6" required autocomplete="new-password"></label><button class="btn btn-gold">Załóż konto</button></form>`}`;
+    : `<form class="form" data-form="signup"><label>Nazwa <span class="muted">(tak będą cię widzieć inni)</span><input name="full_name" required maxlength="40" autocomplete="nickname" placeholder="np. Kowal"></label><label>E-mail <span class="muted">(opcjonalnie — jeśli podasz, logujesz się mailem i możesz odzyskać hasło)</span><input name="email" type="email" autocomplete="email"></label><label>Hasło <span class="muted">(min. 6 znaków)</span><input name="password" type="password" minlength="6" required autocomplete="new-password"></label><button class="btn btn-gold">Załóż konto</button></form>`}`;
 }
 
 function duelModal(d) {
@@ -486,7 +486,7 @@ document.addEventListener('click', async (e) => {
   if (a === 'round-del') { if (!confirm('Usunąć rundę razem ze wszystkimi jej pojedynkami?')) return; S.draft = null; return act(() => api.remove('rounds', { id }), 'Runda usunięta'); }
   if (a === 'round-rename') { const n = prompt('Nowa nazwa rundy', R(id)?.name); if (n?.trim()) act(() => api.update('rounds', { id }, { name: n.trim() })); return; }
   if (a === 'person-rename') {
-    const n = prompt(`Nowa nazwa dla „${nm(P(id))}” (imię i nazwisko lub ksywa).\nUwaga: login tej osoby się nie zmienia.`, nm(P(id)));
+    const n = prompt(`Nowa nazwa dla „${nm(P(id))}” .\nUwaga: login tej osoby się nie zmienia.`, nm(P(id)));
     if (n == null) return; const v = n.trim().slice(0, 40);
     if (!v) return toast('Nazwa nie może być pusta.', 'err');
     return act(() => api.update('profiles', { id }, { full_name: v, nickname: null }), 'Nazwa zmieniona');
@@ -532,9 +532,9 @@ document.addEventListener('submit', async (e) => {
   const done = () => { if (btn) btn.disabled = false; };
   const k = f.dataset.form;
   try {
-    if (k === 'signin') { await api.signIn({ email: toEmail(v.email), password: v.password }); S.modal = null; toast('Witaj na arenie!'); await refresh(); }
+    if (k === 'signin') { try { await api.signIn({ email: toEmail(v.email), password: v.password }); } catch (err) { if (!v.email.includes('@') && /Zły e-mail lub hasło/.test(err.message)) throw new Error('Zła nazwa lub hasło. Jeśli przy rejestracji podałeś maila — zaloguj się mailem.'); throw err; } S.modal = null; toast('Witaj na arenie!'); await refresh(); }
     if (k === 'signup') {
-      const name = v.full_name.trim(); if (!name) throw new Error('Wpisz imię i nazwisko lub ksywę.');
+      const name = v.full_name.trim(); if (!name) throw new Error('Wpisz nazwę.');
       const email = v.email.trim() ? v.email.trim().toLowerCase() : toEmail(name);
       let r;
       try { r = await api.signUp({ email, password: v.password, full_name: name, nickname: null }); }
@@ -546,7 +546,7 @@ document.addEventListener('submit', async (e) => {
     }
     if (k === 'profile') {
       const row = { full_name: v.full_name.trim(), nickname: null };
-      if (!row.full_name) throw new Error('Wpisz imię i nazwisko lub ksywę.');
+      if (!row.full_name) throw new Error('Wpisz nazwę.');
       if (S.me) await api.update('profiles', { id: S.user.id }, row); else await api.insert('profiles', { id: S.user.id, ...row });
       if (S.modal?.type === 'profile-setup') S.modal = null;
       toast('Zapisano'); await refresh();
