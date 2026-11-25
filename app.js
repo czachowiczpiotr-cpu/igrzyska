@@ -1,4 +1,4 @@
-import { makeApi } from './api.js?v=11';
+import { makeApi } from './api.js?v=12';
 
 const api = await makeApi();
 const S = {
@@ -92,13 +92,15 @@ async function refresh() {
     S.user = await api.session();
     S.admin = S.user ? await api.isAdmin() : false;
     S.me = S.user ? P(S.user.id) || null : null;
-    if (S.user && !S.me && S.user.meta?.ig_full_name && !S.creatingProfile) {
+    if (S.user && !S.me && S.user.meta?.ig_full_name && !S.creatingProfile && !S.profileFailed) {
       S.creatingProfile = true;
-      try { await api.insert('profiles', { id: S.user.id, full_name: S.user.meta.ig_full_name, nickname: S.user.meta.ig_nickname || null }); S.data = await api.load(); S.me = P(S.user.id); } catch (e) { console.warn(e); } finally { S.creatingProfile = false; }
+      try { await api.insert('profiles', { id: S.user.id, full_name: S.user.meta.ig_full_name, nickname: S.user.meta.ig_nickname || null }); S.data = await api.load(); S.me = P(S.user.id); } catch (e) { console.warn(e); S.profileFailed = true; } finally { S.creatingProfile = false; }
     }
   } catch (e) { toast('Nie udało się wczytać danych: ' + e.message, 'err'); }
   S.loading = false;
-  if (S.user && !S.me && !S.modal) S.modal = { type: 'profile-setup' };
+  // okienko „Jak mamy cię wyświetlać?” tylko gdy profilu naprawdę brak (nie w trakcie jego zapisu po rejestracji)
+  if (S.user && !S.me && !S.modal && !S.creatingProfile && (!S.user.meta?.ig_full_name || S.profileFailed)) S.modal = { type: 'profile-setup' };
+  if (S.me && S.modal?.type === 'profile-setup') S.modal = null;
   safeRender();
 }
 function safeRender() {
