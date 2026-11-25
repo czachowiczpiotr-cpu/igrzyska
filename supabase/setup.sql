@@ -121,3 +121,26 @@ alter table ig_rounds add column if not exists bracket boolean not null default 
 -- Migracja 2026-11-25b (tajne kategorie):
 drop policy if exists ig_cat_read on ig_categories;
 create policy ig_cat_read on ig_categories for select using (ig_is_admin() or exists (select 1 from ig_duels d where d.category_id = ig_categories.id));
+
+-- Migracja 2026-11-26 (godzina startu, zdjęcia wyników, typy do 10 min przed startem):
+alter table ig_duels add column if not exists starts_at timestamptz;
+alter table ig_duels add column if not exists proof_url text;
+drop policy if exists ig_pred_ins on ig_predictions;
+create policy ig_pred_ins on ig_predictions for insert with check (
+  user_id = auth.uid() and exists (select 1 from ig_duels d where d.id = duel_id and d.status <> 'done' and not d.tips_locked
+    and (d.starts_at is null or now() < d.starts_at - interval '10 minutes')));
+drop policy if exists ig_pred_upd on ig_predictions;
+create policy ig_pred_upd on ig_predictions for update using (user_id = auth.uid())
+  with check (user_id = auth.uid() and exists (select 1 from ig_duels d where d.id = duel_id and d.status <> 'done' and not d.tips_locked
+    and (d.starts_at is null or now() < d.starts_at - interval '10 minutes')));
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+  values ('ig-proofs', 'ig-proofs', true, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
+  on conflict (id) do nothing;
+drop policy if exists ig_proofs_read on storage.objects;
+create policy ig_proofs_read on storage.objects for select using (bucket_id = 'ig-proofs');
+drop policy if exists ig_proofs_ins on storage.objects;
+create policy ig_proofs_ins on storage.objects for insert to authenticated with check (bucket_id = 'ig-proofs' and public.ig_is_admin());
+drop policy if exists ig_proofs_upd on storage.objects;
+create policy ig_proofs_upd on storage.objects for update to authenticated using (bucket_id = 'ig-proofs' and public.ig_is_admin());
+drop policy if exists ig_proofs_del on storage.objects;
+create policy ig_proofs_del on storage.objects for delete to authenticated using (bucket_id = 'ig-proofs' and public.ig_is_admin());

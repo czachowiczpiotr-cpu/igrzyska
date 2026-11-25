@@ -1,10 +1,12 @@
-import { makeApi } from './api.js?v=13';
+import { makeApi } from './api.js?v=14';
 
 const api = await makeApi();
+function seenStart() { try { return localStorage.getItem('ig.seenStart') === '1'; } catch { return false; } }
+function markSeen() { try { localStorage.setItem('ig.seenStart', '1'); } catch {} }
 const S = {
   data: { profiles: [], categories: [], rounds: [], duels: [], predictions: [] },
   user: null, me: null, admin: false, loading: true,
-  route: (location.hash.slice(2) || 'arena'), modal: null, draft: null, catFilter: 'all', dirty: false,
+  route: (location.hash.slice(2) || (seenStart() ? 'auto' : 'start')), modal: null, draft: null, catFilter: 'all', dirty: false,
 };
 const app = document.getElementById('app');
 
@@ -21,7 +23,12 @@ const slug = (t) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/
 const toEmail = (id) => { id = id.trim(); if (id.includes('@')) return id.toLowerCase(); const s = slug(id); if (!s) throw new Error('Wpisz nazwę albo e-mail.'); return `${s}@${LOGIN_DOMAIN}`; };
 const loginName = (email = '') => (email.endsWith('@' + LOGIN_DOMAIN) ? email.split('@')[0] : email);
 const sub = (p) => (p?.nickname ? p.full_name : '');
-const canTipOn = (d) => d && d.status !== 'done' && !d.tips_locked && d.p1 && d.p2;
+const TIP_CUTOFF_MIN = 10;
+const tipDeadline = (d) => (d?.starts_at ? new Date(new Date(d.starts_at).getTime() - TIP_CUTOFF_MIN * 60e3) : null);
+const canTipOn = (d) => d && d.status !== 'done' && !d.tips_locked && d.p1 && d.p2 && !(tipDeadline(d) && Date.now() >= tipDeadline(d));
+const fmtTime = (iso) => { if (!iso) return ''; const t = new Date(iso); return t.toLocaleString('pl-PL', { weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }); };
+const toLocalInput = (iso) => { if (!iso) return ''; const t = new Date(iso); const z = (n) => String(n).padStart(2, '0'); return `${t.getFullYear()}-${z(t.getMonth() + 1)}-${z(t.getDate())}T${z(t.getHours())}:${z(t.getMinutes())}`; };
+const firstTab = () => (showR1() ? 'runda1' : 'drabinka');
 function tipRanking() {
   const pts = {};
   S.data.predictions.forEach((pr) => {
@@ -126,9 +133,9 @@ const NAV = [['arena', 'Arena'], ['drabinka', 'Drabinka'], ['zawodnicy', 'Zawodn
 
 function header() {
   // 1. runda ↔ drabinka zamieniają się miejscami; kategorie tylko dla adminów
-  const nav = [['arena', 'Arena'], showR1() ? ['runda1', '1. runda'] : ['drabinka', 'Drabinka'], ['zawodnicy', 'Zawodnicy'], ['typy', 'Typy'], ...(S.admin ? [['kategorie', 'Kategorie'], ['admin', 'Panel']] : [])];
+  const nav = [showR1() ? ['runda1', '1. runda'] : ['drabinka', 'Drabinka'], ['typy', 'Typy'], ['pojedynki', 'Pojedynki'], ['zawodnicy', 'Zawodnicy'], ...(S.admin ? [['kategorie', 'Kategorie'], ['admin', 'Panel']] : [])];
   return `<header class="top">
-    <a class="brand" href="#/arena"><span class="brand-mark">◆</span><span class="brand-word">IGRZYSKA</span></a>
+    <a class="brand" href="#/start" title="Strona startowa"><span class="brand-mark">◆</span><span class="brand-word">IGRZYSKA</span></a>
     <nav class="nav">${nav.map(([k, l]) => `<a href="#/${k}" class="${S.route === k ? 'on' : ''}">${l}${k === 'admin' ? ' <i class="dot-admin"></i>' : ''}</a>`).join('')}</nav>
     <div class="who">${S.user
       ? `<a class="chip-me" href="#/profil">${av(S.me, 'sm')}<span>${esc(nm(S.me))}</span></a>`
@@ -145,27 +152,32 @@ function duelMini(d, labels = []) {
   return `<button class="duel-mini spot ${d.status}" data-act="duel" data-id="${d.id}">
     ${row(a, d.p1, d.score1, labels[0])}${row(b, d.p2, d.score2, labels[1])}
     <div class="dm-foot">${isBye(d) && d.status === 'done' ? '<span class="muted">Awans bez walki</span>' : !d.p1 && !d.p2 ? `<span class="muted">${S.admin ? 'kliknij, żeby wpisać osoby' : 'czeka na zawodników'}</span>` : c ? `<span class="cat-chip">${esc(c.emoji || '•')} ${esc(c.name)}</span>` : '<span class="muted">Kategoria: ?</span>'}
-    ${d.status === 'live' ? '<span class="live-tag">TRWA</span>' : d.when_at && d.status === 'pending' ? `<span class="muted">${esc(d.when_at)}</span>` : ''}</div>
+    ${d.proof_url ? '<span title="jest zdjęcie">📷</span>' : ''}${d.status === 'live' ? '<span class="live-tag">TRWA</span>' : d.status === 'pending' && (d.starts_at || d.when_at) ? `<span class="muted">${esc(d.starts_at ? fmtTime(d.starts_at) : d.when_at)}</span>` : ''}</div>
   </button>`;
 }
 
-function viewArena() {
-  const ps = players(), rs = rounds(), ch = champion();
+function viewStart() {
+  const ps = players(), ch = champion();
   const alive = ps.filter((p) => status(p.id) !== 'out').length;
   const played = S.data.duels.filter((d) => d.status === 'done' && !isBye(d)).length;
   const unused = S.data.categories.filter((c) => !usedCatIds().has(c.id));
-  const nx = nextDuel();
-  const allD = rounds().flatMap((r) => duelsOf(r.id));
-  const live = allD.filter((d) => d.status === 'live');
-  const upcoming = allD.filter((d) => d.status === 'pending' && d.p1 && d.p2).slice(0, 6);
-  const recent = allD.filter((d) => d.status === 'done' && d.p1 && d.p2).sort((x, y) => (y.updated_at || '').localeCompare(x.updated_at || '')).slice(0, 4);
+  const live = rounds().flatMap((r) => duelsOf(r.id)).filter((d) => d.status === 'live');
   const champ = ch ? P(ch) : null;
+  const tab = firstTab();
+  const steps = [
+    ['Załóż konto', 'Nazwa i hasło wystarczą, mail jest opcjonalny. Bez konta też możesz wszystko oglądać.'],
+    ['1. runda', `${ps.length || 12} zawodników, pojedynki 1 na 1 w kategoriach wymyślonych przez organizatorów — od ciasta po liczbę kroków.`],
+    ['Drabinka', 'Zwycięzcy 1. rundy i 2 osoby, które wrócą (jak? na razie tajemnica), grają puchar: ćwierćfinały, półfinały, finał. Przegrany odpada.'],
+    ['Typuj', `Obstaw zwycięzcę każdej walki w zakładce Typy. 1 pkt za trafienie. Typy zamykają się ${TIP_CUTOFF_MIN} min przed startem walki.`],
+    ['Dwie korony', 'Na koniec ogłaszamy Mistrza Igrzysk i Mistrza Typowania.'],
+  ];
   return `
   <section class="hero">
     <div class="hero-grid"></div>
     <p class="eyebrow">Edycja ${new Date().getFullYear()} · ${ps.length || 12} zawodników · 1 korona</p>
     <h1 class="shine">Kto jest<br>najlepszy?</h1>
-    <p class="lead">Pojedynki 1 na 1 w losowych kategoriach. Od ciasta po liczbę kroków. Drabinka jak w pucharze: przegrywasz — odpadasz. Prawie zawsze — 2 osoby wrócą do ósemki, ale jak, to na razie tajemnica.</p>
+    <p class="lead">Turniej ekipy: pojedynki 1 na 1 w losowych kategoriach, drabinka jak w pucharze i typowanie dla wszystkich.</p>
+    <div class="row-gap hero-cta"><a class="btn btn-gold" href="#/${tab}">${tab === 'runda1' ? 'Zobacz 1. rundę' : 'Zobacz drabinkę'} →</a><a class="btn ghost" href="#/typy">Typuj</a>${S.user ? '' : '<button class="btn ghost" data-act="login">Zaloguj się</button>'}</div>
     <div class="stats">
       <div class="stat spot"><b>${alive}<small>/${ps.length}</small></b><span>w grze</span></div>
       <div class="stat spot"><b>${played}</b><span>rozegranych walk</span></div>
@@ -173,10 +185,11 @@ function viewArena() {
     </div>
   </section>
   ${champ ? finals(champ) : ''}
-  ${live.length ? `<section class="block"><div class="block-head"><h2>Trwa teraz <span class="muted">${live.length}</span></h2>${showR1() ? '<a class="btn ghost sm" href="#/runda1">1. runda →</a>' : '<a class="btn ghost sm" href="#/drabinka">Drabinka →</a>'}</div><div class="live-grid">${live.map(featured).join('')}</div></section>` : rs.length ? `<section class="block"><div class="block-head"><h2>Trwa teraz</h2>${showR1() ? '<a class="btn ghost sm" href="#/runda1">1. runda →</a>' : '<a class="btn ghost sm" href="#/drabinka">Drabinka →</a>'}</div><div class="empty spot"><p class="muted">W tej chwili nie trwa żadna walka.</p></div></section>` : ''}
-  ${upcoming.length ? `<section class="block"><div class="block-head"><h2>Następne walki</h2></div><div class="grid duels-open">${upcoming.map((d) => duelMini(d)).join('')}</div></section>` : ''}
-  ${recent.length ? `<section class="block"><div class="block-head"><h2>Ostatnie wyniki</h2></div><div class="grid duels-open">${recent.map((d) => duelMini(d)).join('')}</div></section>` : ''}
-  ${rs.length ? '' : `<section class="block"><div class="empty spot"><div class="empty-ico">⚔︎</div><h3>Igrzyska jeszcze się nie zaczęły</h3><p class="muted">${ps.length ? `${ps.length} zawodników czeka na 1. rundę.` : 'Najpierw zapiszcie się i poczekajcie, aż admin doda was jako zawodników.'}</p>${S.admin ? `<a class="btn btn-gold" href="#/admin">Ułóż 1. rundę</a>` : ''}</div></section>`}
+  ${live.length ? `<a class="live-strip spot" href="#/${tab}"><span class="live-tag">TRWA</span><span>${plural(live.length, 'walka trwa', 'walki trwają', 'walk trwa')} teraz</span><span class="muted">zobacz →</span></a>` : ''}
+  <section class="block">
+    <div class="block-head"><h2>Jak to działa</h2></div>
+    <div class="grid steps">${steps.map(([t, x], i) => `<div class="step spot"><span class="step-n">${i + 1}</span><b>${t}</b><p>${x}</p></div>`).join('')}</div>
+  </section>
   ${S.admin && unused.length ? `<section class="marquee" aria-label="Kategorie w puli"><div class="mq-track">${[...unused, ...unused].map((c) => `<span>${esc(c.emoji || '◆')} ${esc(c.name)}</span>`).join('')}</div></section>` : ''}`;
 }
 
@@ -192,7 +205,8 @@ function viewRound1() {
   return `<section class="block">
     <div class="block-head"><h2>1. runda</h2>${ds.length ? `<span class="pill">${done}/${ds.length} rozegranych</span>` : ''}</div>
     <p class="lead small">Zwycięzcy trafią losowo do drabinki. Ta zakładka zniknie, gdy wszystkie walki będą rozegrane.</p>
-    ${ds.length ? `<div class="live-grid">${ds.map((d) => (d.status === 'done' ? `<div class="r1-done">${duelMini(d)}</div>` : featured(d))).join('')}</div>`
+    ${ds.length ? `${ds.some((d) => d.status !== 'done') ? `<h3 class="sub-h">Do rozegrania</h3><div class="live-grid">${ds.filter((d) => d.status !== 'done').map(featured).join('')}</div>` : ''}
+      ${ds.some((d) => d.status === 'done') ? `<h3 class="sub-h">Zakończone</h3><div class="grid hist">${ds.filter((d) => d.status === 'done').map(histCard).join('')}</div>` : ''}`
     : `<div class="empty spot"><h3>Pary 1. rundy jeszcze nie są wpisane</h3><p class="muted">${S.admin ? 'Wpisz je w Panelu: „Ułóż pary ręcznie”.' : 'Pojawią się tu, gdy admini je wpiszą.'}</p>${S.admin ? '<a class="btn btn-gold" href="#/admin">Przejdź do Panelu</a>' : ''}</div>`}
   </section>`;
 }
@@ -250,13 +264,31 @@ function finals(champ) {
 function featured(d) {
   const a = P(d.p1), b = P(d.p2), c = C(d.category_id), r = R(d.round_id);
   return `<section class="featured spot ${d.status}" data-act="duel" data-id="${d.id}" role="button" tabindex="0">
-    <div class="ft-top"><span class="eyebrow">${d.status === 'live' ? '<span class="live-tag">TRWA</span>' : 'Następny pojedynek'} · ${esc(r?.name || '')}</span>${d.when_at ? `<span class="muted">${esc(d.when_at)}</span>` : ''}</div>
+    <div class="ft-top"><span class="eyebrow">${d.status === 'live' ? '<span class="live-tag">TRWA</span>' : 'Czeka'} · ${esc(r?.name || '')}</span><span class="muted small">${d.starts_at ? 'start ' + esc(fmtTime(d.starts_at)) : esc(d.when_at || '')}</span></div>
     <div class="vs">
       <div class="vs-side">${av(a, 'lg')}<b>${esc(nm(a))}</b><small>${esc(sub(a))}</small></div>
       <div class="vs-mid"><span>VS</span></div>
       <div class="vs-side">${av(b, 'lg')}<b>${esc(nm(b))}</b><small>${esc(sub(b))}</small></div>
     </div>
     <div class="ft-cat">${c ? `<span class="cat-big">${esc(c.emoji || '◆')}</span><span><b>${esc(c.name)}</b>${c.description ? `<small>${esc(c.description)}</small>` : ''}</span>` : '<span class="muted">Kategoria zostanie wylosowana</span>'}</div>
+  </section>`;
+}
+
+function histCard(d) {
+  const a = P(d.p1), b = P(d.p2), c = C(d.category_id), r = R(d.round_id);
+  const side = (p, pid, sc) => `<div class="hc-side ${d.winner === pid ? 'win' : 'lose'}">${av(p, 'md')}<b>${esc(nm(p))}</b>${sc ? `<span class="score">${esc(sc)}</span>` : ''}${d.winner === pid ? '<span class="crown">♛</span>' : ''}</div>`;
+  return `<button class="hcard spot" data-act="duel" data-id="${d.id}">
+    <div class="hc-top"><span class="eyebrow">${esc(r?.name || '')}</span><span class="muted small">${esc(fmtTime(d.starts_at || d.updated_at))}</span></div>
+    <div class="hc-vs">${side(a, d.p1, d.score1)}<span class="hc-mid">vs</span>${side(b, d.p2, d.score2)}</div>
+    <div class="hc-foot">${c ? `<span class="cat-chip">${esc(c.emoji || '•')} ${esc(c.name)}</span>` : '<span class="muted">bez kategorii</span>'}${d.proof_url ? `<img class="hc-thumb" src="${esc(d.proof_url)}" alt="zdjęcie wyniku" loading="lazy">` : ''}</div>
+  </button>`;
+}
+function viewHistory() {
+  const ds = S.data.duels.filter((d) => d.status === 'done' && d.p1 && d.p2).sort((x, y) => (y.updated_at || '').localeCompare(x.updated_at || ''));
+  return `<section class="block">
+    <div class="block-head"><h2>Pojedynki <span class="muted">${ds.length}</span></h2></div>
+    <p class="lead small">Historia rozegranych walk — od najnowszej. Kliknij, żeby zobaczyć szczegóły i zdjęcie.</p>
+    ${ds.length ? `<div class="grid hist">${ds.map(histCard).join('')}</div>` : '<div class="empty spot"><p class="muted">Jeszcze żadna walka się nie skończyła.</p></div>'}
   </section>`;
 }
 
@@ -299,12 +331,19 @@ function viewTips() {
   const open = rounds().flatMap((r) => duelsOf(r.id)).filter(canTipOn);
   return `<section class="block">
     <div class="block-head"><h2>Typy</h2></div>
-    <p class="lead small">Przed każdym pojedynkiem obstaw, kto wygra. 1 punkt za trafienie. Typowanie zamykają moderatorzy (albo samo, gdy walka się skończy). Na koniec igrzysk obok Mistrza Igrzysk ogłaszamy też Mistrza Typowania.</p>
+    <p class="lead small">Kliknij, kto wygra. 1 punkt za trafienie. Typy zamykają się ${TIP_CUTOFF_MIN} min przed startem walki (albo gdy zamkną je admini). Na koniec ogłaszamy Mistrza Typowania.</p>
     ${rows.length ? `<div class="typer-lead spot">${av(rows[0].p, 'md')}<div><span class="eyebrow">${champion() ? 'Mistrz Typowania' : 'Prowadzi w typowaniu'}</span><b>${esc(nm(rows[0].p))}</b></div><b class="tl-pts">${rows[0].hit} pkt</b></div>` : ''}
-    ${open.length ? `<h3 class="sub-h">Do obstawienia</h3><div class="grid duels-open">${open.map((d) => {
+    <h3 class="sub-h">Do obstawienia</h3>
+    ${open.length ? `<div class="grid tips-list">${open.map((d) => {
       const mine = S.user && predsOf(d.id).find((p) => p.user_id === S.user.id);
-      return `<button class="open-tip spot" data-act="duel" data-id="${d.id}">${av(P(d.p1), 'xs')}<b>${esc(nm(P(d.p1)))}</b><span class="muted">vs</span><b>${esc(nm(P(d.p2)))}</b>${av(P(d.p2), 'xs')}<span class="ot-state ${mine ? 'done' : ''}">${mine ? '✓ ' + esc(nm(P(mine.pick))) : 'Typuj →'}</span></button>`;
-    }).join('')}</div>` : ''}
+      const c = C(d.category_id), dl = tipDeadline(d);
+      const btn = (pid) => S.user ? `<button class="btn ${mine?.pick === pid ? 'btn-gold' : 'ghost'} tip-pick" data-act="tip" data-id="${d.id}" data-pick="${pid}">${av(P(pid), 'xs')}${esc(nm(P(pid)))}</button>` : '';
+      return `<div class="tip-card spot">
+        <div class="tc-top"><span class="eyebrow">${esc(R(d.round_id)?.name || '')}${c ? ' · ' + esc((c.emoji || '') + ' ' + c.name) : ''}</span><button class="link" data-act="duel" data-id="${d.id}">szczegóły</button></div>
+        ${S.user ? `<div class="tip-btns">${btn(d.p1)}${btn(d.p2)}</div>` : `<div class="tc-names"><b>${esc(nm(P(d.p1)))}</b><span class="muted">vs</span><b>${esc(nm(P(d.p2)))}</b></div><button class="btn ghost full" data-act="login">Zaloguj się, żeby typować</button>`}
+        <span class="muted small">${dl ? `typy do ${esc(fmtTime(dl.toISOString()))}` : 'typy otwarte do startu walki'}${mine ? ' · ✓ twój typ: ' + esc(nm(P(mine.pick))) : ''}</span>
+      </div>`;
+    }).join('')}</div>` : '<div class="empty spot"><p class="muted">Teraz nie ma walk do obstawienia.</p></div>'}
     <h3 class="sub-h">Ranking typerów</h3>
     ${rows.length ? `<ol class="rank">${rows.map((r, i) => `<li class="spot ${S.user?.id === r.p.id ? 'me' : ''}"><span class="rk">${i + 1}</span>${av(r.p, 'sm')}<span class="rn">${esc(nm(r.p))}</span><span class="muted">${r.hit}/${r.all}</span><b>${r.hit} pkt</b></li>`).join('')}</ol>`
     : `<div class="empty spot"><p class="muted">Ranking pojawi się po pierwszym rozstrzygniętym pojedynku.</p></div>`}
@@ -432,12 +471,13 @@ function duelModal(d) {
   const pct1 = tot ? Math.round((n1 / tot) * 100) : 50;
   const side = (p, pid, score) => `<div class="vs-side ${d.status === 'done' && d.winner === pid ? 'winner' : d.status === 'done' && d.winner ? 'loser' : ''}">${d.status === 'done' && d.winner === pid ? '<span class="crown big">♛</span>' : ''}${av(p, 'lg')}<b>${pid ? esc(nm(p)) : isBye(d) && d.status === 'done' ? 'wolny los' : 'do ustalenia'}</b><small>${esc(sub(p))}</small>${score ? `<span class="score">${esc(score)}</span>` : ''}</div>`;
   const canTip = S.user && canTipOn(d);
-  return `<p class="eyebrow">${esc(r?.name || '')} · ${d.status === 'live' ? '<span class="live-tag">TRWA</span>' : d.status === 'done' ? 'Zakończony' : 'Oczekuje'}${d.when_at ? ' · ' + esc(d.when_at) : ''}</p>
+  return `<p class="eyebrow">${esc(r?.name || '')} · ${d.status === 'live' ? '<span class="live-tag">TRWA</span>' : d.status === 'done' ? 'Zakończony' : 'Oczekuje'}${d.starts_at ? ' · start ' + esc(fmtTime(d.starts_at)) : ''}${d.when_at ? ' · ' + esc(d.when_at) : ''}</p>
   <div class="vs modal-vs">${side(a, d.p1, d.score1)}<div class="vs-mid"><span>VS</span></div>${side(b, d.p2, d.score2)}</div>
   <div class="cat-box" id="cat-box">${c ? `<span class="cat-big">${esc(c.emoji || '◆')}</span><div><b>${esc(c.name)}</b>${c.description ? `<p>${esc(c.description)}</p>` : ''}</div>` : `<span class="cat-big">?</span><div><b>Kategoria jeszcze nie wylosowana</b></div>`}</div>
   ${d.note ? `<p class="note">${esc(d.note)}</p>` : ''}
+  ${d.proof_url ? `<a class="proof" href="${esc(d.proof_url)}" target="_blank" rel="noopener"><img src="${esc(d.proof_url)}" alt="zdjęcie wyniku"></a>` : ''}
   ${d.p1 && d.p2 ? `<div class="tips">
-    <div class="tips-head"><b>${canTipOn(d) ? 'Kto wygra?' : 'Typy'}</b>${!canTipOn(d) && d.status !== 'done' ? '<span class="muted small">typowanie zamknięte</span>' : ''}<span class="muted small">${plural(tot, 'typ', 'typy', 'typów')}</span></div>
+    <div class="tips-head"><b>${canTipOn(d) ? 'Kto wygra?' : 'Typy'}</b>${!canTipOn(d) && d.status !== 'done' ? '<span class="muted small">typowanie zamknięte</span>' : canTipOn(d) && tipDeadline(d) ? `<span class="muted small">do ${esc(fmtTime(tipDeadline(d).toISOString()))}</span>` : ''}<span class="muted small">${plural(tot, 'typ', 'typy', 'typów')}</span></div>
     ${canTip ? `<div class="tip-btns"><button class="btn ${mine?.pick === d.p1 ? 'btn-gold' : 'ghost'}" data-act="tip" data-id="${d.id}" data-pick="${d.p1}">${esc(nm(a))}</button><button class="btn ${mine?.pick === d.p2 ? 'btn-gold' : 'ghost'}" data-act="tip" data-id="${d.id}" data-pick="${d.p2}">${esc(nm(b))}</button></div>` : !S.user && canTipOn(d) ? `<button class="btn ghost full" data-act="login">Zaloguj się, żeby typować</button>` : ''}
     <div class="bar"><span style="width:${pct1}%"></span></div><div class="bar-l"><span>${esc(nm(a))} ${tot ? pct1 + '%' : ''}</span><span>${tot ? 100 - pct1 + '% ' : ''}${esc(nm(b))}</span></div>
   </div>` : ''}
@@ -457,7 +497,9 @@ function duelAdmin(d) {
     <div class="two cat-row"><label>Kategoria<select name="category_id" id="cat-sel">${catOpts}</select></label><button type="button" class="btn ghost" data-act="roll-cat">🎲 Losuj</button></div>
     <label>…albo wpisz konkurencję <span class="muted">(np. wylosowaną wcześniej — doda się do listy kategorii)</span><input name="new_cat" maxlength="80" placeholder="np. 🎂 Kto upiecze lepsze ciasto"></label>
     <label class="check"><input type="checkbox" name="tips_locked" ${d.tips_locked ? 'checked' : ''}> Zamknij typowanie</label>
-    <label>Kiedy <span class="muted">(dowolny tekst)</span><input name="when_at" maxlength="40" value="${esc(d.when_at || '')}" placeholder="np. sobota 18:00, u Olka"></label>
+    <div class="two"><label>Start walki <span class="muted">(typy zamkną się ${TIP_CUTOFF_MIN} min wcześniej)</span><input type="datetime-local" name="starts_at" value="${toLocalInput(d.starts_at)}"></label><label>Gdzie / dopisek<input name="when_at" maxlength="40" value="${esc(d.when_at || '')}" placeholder="np. u Olka"></label></div>
+    <label>Zdjęcie do wyniku <span class="muted">(opcjonalnie, np. screen)</span><input type="file" name="proof" accept="image/*"></label>
+    ${d.proof_url ? `<div class="proof-row"><img src="${esc(d.proof_url)}" alt=""><label class="check"><input type="checkbox" name="remove_proof"> Usuń zdjęcie</label></div>` : ''}
     <label>Notatka<textarea name="note" rows="2" maxlength="300">${esc(d.note || '')}</textarea></label>
     <div class="row-gap"><button class="btn btn-gold">Zapisz</button><button type="button" class="btn ghost danger" data-act="duel-del" data-id="${d.id}">Usuń pojedynek</button></div>
   </form></details>`;
@@ -477,14 +519,16 @@ function render() {
   S.dirty = false;
   const sc = document.getElementById('rounds')?.scrollLeft || 0;
   const sb = document.getElementById('bracket')?.scrollLeft || 0;
-  const views = { arena: viewArena, runda1: viewRound1, drabinka: viewBracketPage, zawodnicy: viewPlayers, kategorie: viewCategories, typy: viewTips, admin: viewAdmin, profil: viewProfile };
+  const views = { start: viewStart, pojedynki: viewHistory, runda1: viewRound1, drabinka: viewBracketPage, zawodnicy: viewPlayers, kategorie: viewCategories, typy: viewTips, admin: viewAdmin, profil: viewProfile };
   if (!S.loading) {
     const go = (r) => { S.route = r; history.replaceState(null, '', '#/' + r); };
+    if (S.route === 'auto' || S.route === 'arena') go(S.route === 'arena' ? 'start' : firstTab());
+    if (S.route !== 'start') markSeen();
     if (S.route === 'runda1' && !showR1()) go('drabinka');
     else if (S.route === 'drabinka' && showR1()) go('runda1');
-    else if (S.route === 'kategorie' && !S.admin) go('arena');
+    else if (S.route === 'kategorie' && !S.admin) go('start');
   }
-  const v = views[S.route] || viewArena;
+  const v = views[S.route] || viewStart;
   app.innerHTML = header() + `<main>${S.loading ? '<div class="loader"><span></span></div>' : v()}</main><footer class="foot">Igrzyska · zrobione dla ekipy</footer>` + modalHtml();
   const rEl = document.getElementById('rounds'); if (rEl) rEl.scrollLeft = sc;
   const bEl = document.getElementById('bracket'); if (bEl) bEl.scrollLeft = sb;
@@ -492,7 +536,7 @@ function render() {
 }
 
 /* ---------- events ---------- */
-window.addEventListener('hashchange', () => { S.route = location.hash.slice(2) || 'arena'; S.modal = null; render(); scrollTo(0, 0); });
+window.addEventListener('hashchange', () => { S.route = location.hash.slice(2) || 'start'; S.modal = null; render(); scrollTo(0, 0); });
 document.addEventListener('focusout', () => setTimeout(() => { if (S.dirty && !(document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) render(); }, 50));
 document.addEventListener('pointermove', (e) => {
   const el = e.target.closest?.('.spot'); if (!el) return;
@@ -609,7 +653,7 @@ document.addEventListener('submit', async (e) => {
     }
     if (k === 'duel') {
       const n = (x) => x || null;
-      const patch = { status: v.status, p1: n(v.p1), p2: n(v.p2), score1: n(v.score1.trim()), score2: n(v.score2.trim()), winner: n(v.winner), category_id: n(v.category_id), when_at: n(v.when_at.trim()), note: n(v.note.trim()), tips_locked: !!v.tips_locked, updated_at: new Date().toISOString() };
+      const patch = { status: v.status, p1: n(v.p1), p2: n(v.p2), score1: n(v.score1.trim()), score2: n(v.score2.trim()), winner: n(v.winner), category_id: n(v.category_id), when_at: n(v.when_at.trim()), starts_at: v.starts_at ? new Date(v.starts_at).toISOString() : null, note: n(v.note.trim()), tips_locked: !!v.tips_locked, updated_at: new Date().toISOString() };
       if (patch.winner && ![patch.p1, patch.p2].includes(patch.winner)) patch.winner = null;
       if (v.new_cat?.trim()) {
         const nc = parseCatLine(v.new_cat.trim());
@@ -617,6 +661,8 @@ document.addEventListener('submit', async (e) => {
         patch.category_id = ex ? ex.id : (await api.insert('categories', nc))[0].id;
       }
       if (patch.status === 'done' && !patch.winner) throw new Error('Wybierz zwycięzcę, żeby zakończyć pojedynek.');
+      if (v.remove_proof) patch.proof_url = null;
+      if (v.proof && v.proof.size) { toast('Wysyłam zdjęcie…'); patch.proof_url = await api.uploadProof(f.dataset.id, await shrinkImage(v.proof)); }
       const old = { ...D(f.dataset.id) };
       await api.update('duels', { id: f.dataset.id }, patch);
       await advance({ ...old, ...patch }, old);
@@ -637,6 +683,17 @@ function parseCatLine(l) {
   const emoji = m?.[1] || null; const rest = (m?.[2] || l).trim();
   const [name, ...desc] = rest.split(/\s+[—–-]\s+/);
   return { emoji, name: name.trim().slice(0, 80), description: desc.join(' — ').trim() || null };
+}
+
+/* ---------- zdjęcia ---------- */
+async function shrinkImage(file, max = 1600) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return await new Promise((res) => c.toBlob((b) => res(b || file), 'image/jpeg', 0.82));
+  } catch { return file; }
 }
 
 /* ---------- drabinka ---------- */
@@ -727,6 +784,7 @@ function rollCategory() {
 
 /* ---------- start ---------- */
 api.onChange(() => refresh());
+setInterval(() => { if (!S.modal && !S.loading) safeRender(); }, 30000);
 api.onAuth((ev) => { if (ev === 'PASSWORD_RECOVERY') { S.modal = { type: 'newpass' }; render(); } else if (ev === 'SIGNED_IN' || ev === 'SIGNED_OUT') refresh(); });
 render();
 refresh();

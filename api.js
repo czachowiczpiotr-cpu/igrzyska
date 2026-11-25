@@ -2,7 +2,7 @@
 const TABLES = ['profiles', 'categories', 'rounds', 'duels', 'predictions'];
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Math.random().toString(36).slice(2) + Date.now());
 
-const tipOpen = (d) => !!d && d.status !== 'done' && !d.tips_locked;
+const tipOpen = (d) => !!d && d.status !== 'done' && !d.tips_locked && !(d.starts_at && Date.now() >= new Date(d.starts_at).getTime() - 10 * 60e3);
 function matches(row, m) { return Object.entries(m).every(([k, v]) => row[k] === v); }
 
 /* ---------------- Supabase ---------------- */
@@ -25,6 +25,12 @@ async function cloudApi(cfg) {
     async setPassword(password) { const { error } = await sb.auth.updateUser({ password }); if (error) throw new Error(plError(error.message)); },
     async signOut() { await sb.auth.signOut(); },
     async isAdmin() { const { data } = await sb.rpc('ig_is_admin'); return !!data; },
+    async uploadProof(duelId, blob) {
+      const path = `${duelId}/${Date.now()}.jpg`;
+      const { error } = await sb.storage.from('ig-proofs').upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
+      if (error) throw new Error('Nie udało się wysłać zdjęcia: ' + plError(error.message));
+      return sb.storage.from('ig-proofs').getPublicUrl(path).data.publicUrl;
+    },
     async load() {
       const res = await Promise.all(TABLES.map((n) => t(n).select('*')));
       const out = {}; TABLES.forEach((n, i) => (out[n] = ok(res[i]) || [])); return out;
@@ -115,6 +121,10 @@ function demoApi() {
     async setPassword(p) { const u = me(); if (u) { u.password = p; save(); } },
     async signOut() { db.session = null; save(); },
     async isAdmin() { return admin(); },
+    async uploadProof(_id, blob) {
+      need(admin());
+      return await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+    },
     async load() { db = read(); return JSON.parse(JSON.stringify(db.tables)); },
     async insert(table, rows) {
       rows = (Array.isArray(rows) ? rows : [rows]).map((r) => defaults(table, r));
