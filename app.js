@@ -1,4 +1,4 @@
-import { makeApi } from './api.js?v=5';
+import { makeApi } from './api.js?v=6';
 
 const api = await makeApi();
 const S = {
@@ -303,7 +303,7 @@ function viewAdmin() {
       ${rs.length ? rs.map((r) => `<div class="adm-row"><b>${esc(r.name)}</b><span class="muted">${plural(duelsOf(r.id).length, 'walka', 'walki', 'walk')}</span><span class="grow"></span><span class="row-gap"><button class="btn ghost xs" data-act="round-cats" data-id="${r.id}" title="Wylosuj kategorie walkom, które jeszcze ich nie mają">🎲 Kategorie</button><button class="btn ghost xs" data-act="round-start" data-id="${r.id}">▶ Start</button><button class="btn ghost xs" data-act="round-add" data-id="${r.id}">+ Walka</button><button class="btn ghost xs" data-act="round-rename" data-id="${r.id}">Nazwa</button><button class="btn ghost xs danger" data-act="round-del" data-id="${r.id}">Usuń</button></span></div>`).join('') : '<p class="muted">Brak rund.</p>'}
       <h3 class="mt">Ludzie <span class="muted">${S.data.profiles.length}</span></h3>
       <p class="muted small">Zaznacz, kto jest zawodnikiem. Reszta to kibice (mogą typować).</p>
-      ${people.map((p) => `<div class="adm-row">${av(p, 'xs')}<b>${esc(nm(p))}</b><span class="muted small">${esc(sub(p))}</span><span class="grow"></span><label class="switch"><input type="checkbox" data-act="toggle-player" data-id="${p.id}" ${p.is_player ? 'checked' : ''}><span></span></label><button class="btn ghost xs danger" data-act="person-del" data-id="${p.id}" title="Usuń profil">✕</button></div>`).join('')}
+      ${people.map((p) => `<div class="adm-row">${av(p, 'xs')}<b>${esc(nm(p))}</b><span class="muted small">${esc(sub(p))}</span><span class="grow"></span><label class="switch"><input type="checkbox" data-act="toggle-player" data-id="${p.id}" ${p.is_player ? 'checked' : ''}><span></span></label><button class="btn ghost xs" data-act="person-rename" data-id="${p.id}" title="Zmień nazwę" aria-label="Zmień nazwę">✎</button><button class="btn ghost xs danger" data-act="person-del" data-id="${p.id}" title="Usuń profil">✕</button></div>`).join('')}
       ${api.mode === 'demo' ? `<h3 class="mt">Demo</h3><div class="row-gap"><button class="btn ghost sm" data-act="demo-seed">Wczytaj przykładowych ludzi i kategorie</button><button class="btn ghost sm danger" data-act="demo-reset">Wyczyść wszystko</button></div>` : ''}
     </div>
     </div>
@@ -435,6 +435,12 @@ document.addEventListener('click', async (e) => {
   if (a === 'cat-del') { if (!confirm('Usunąć kategorię?')) return; S.modal = null; return act(() => api.remove('categories', { id }), 'Usunięto'); }
   if (a === 'round-del') { if (!confirm('Usunąć rundę razem ze wszystkimi jej pojedynkami?')) return; S.draft = null; return act(() => api.remove('rounds', { id }), 'Runda usunięta'); }
   if (a === 'round-rename') { const n = prompt('Nowa nazwa rundy', R(id)?.name); if (n?.trim()) act(() => api.update('rounds', { id }, { name: n.trim() })); return; }
+  if (a === 'person-rename') {
+    const n = prompt(`Nowa nazwa dla „${nm(P(id))}” (imię i nazwisko lub ksywa).\nUwaga: login tej osoby się nie zmienia.`, nm(P(id)));
+    if (n == null) return; const v = n.trim().slice(0, 40);
+    if (!v) return toast('Nazwa nie może być pusta.', 'err');
+    return act(() => api.update('profiles', { id }, { full_name: v, nickname: null }), 'Nazwa zmieniona');
+  }
   if (a === 'person-del') { if (!confirm(`Usunąć profil ${nm(P(id))}? (konto logowania zostaje, profil i typy znikną)`)) return; return act(() => api.remove('profiles', { id }), 'Usunięto'); }
   if (a === 'demo-seed') { api.seed(); S.draft = null; return refresh(); }
   if (a === 'demo-reset') { if (!confirm('Wyczyścić całe demo (też konta)?')) return; api.reset(); S.draft = null; S.modal = null; return refresh(); }
