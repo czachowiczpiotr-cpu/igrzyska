@@ -1,4 +1,4 @@
-import { makeApi } from './api.js?v=12';
+import { makeApi } from './api.js?v=13';
 
 const api = await makeApi();
 const S = {
@@ -125,7 +125,8 @@ function toast(msg, kind = 'ok') {
 const NAV = [['arena', 'Arena'], ['drabinka', 'Drabinka'], ['zawodnicy', 'Zawodnicy'], ['typy', 'Typy'], ['kategorie', 'Kategorie']];
 
 function header() {
-  const nav = [...NAV.slice(0, 1), ...(showR1() ? [['runda1', '1. runda']] : []), ...NAV.slice(1), ...(S.admin ? [['admin', 'Panel']] : [])];
+  // 1. runda ↔ drabinka zamieniają się miejscami; kategorie tylko dla adminów
+  const nav = [['arena', 'Arena'], showR1() ? ['runda1', '1. runda'] : ['drabinka', 'Drabinka'], ['zawodnicy', 'Zawodnicy'], ['typy', 'Typy'], ...(S.admin ? [['kategorie', 'Kategorie'], ['admin', 'Panel']] : [])];
   return `<header class="top">
     <a class="brand" href="#/arena"><span class="brand-mark">◆</span><span class="brand-word">IGRZYSKA</span></a>
     <nav class="nav">${nav.map(([k, l]) => `<a href="#/${k}" class="${S.route === k ? 'on' : ''}">${l}${k === 'admin' ? ' <i class="dot-admin"></i>' : ''}</a>`).join('')}</nav>
@@ -168,15 +169,15 @@ function viewArena() {
     <div class="stats">
       <div class="stat spot"><b>${alive}<small>/${ps.length}</small></b><span>w grze</span></div>
       <div class="stat spot"><b>${played}</b><span>rozegranych walk</span></div>
-      <div class="stat spot"><b>${unused.length}</b><span>kategorii w puli</span></div>
+      ${S.admin ? `<div class="stat spot"><b>${unused.length}</b><span>kategorii w puli</span></div>` : `<div class="stat spot"><b>${S.data.predictions.length}</b><span>oddanych typów</span></div>`}
     </div>
   </section>
   ${champ ? finals(champ) : ''}
-  ${live.length ? `<section class="block"><div class="block-head"><h2>Trwa teraz <span class="muted">${live.length}</span></h2><a class="btn ghost sm" href="#/drabinka">Drabinka →</a></div><div class="live-grid">${live.map(featured).join('')}</div></section>` : rs.length ? `<section class="block"><div class="block-head"><h2>Trwa teraz</h2><a class="btn ghost sm" href="#/drabinka">Drabinka →</a></div><div class="empty spot"><p class="muted">W tej chwili nie trwa żadna walka.</p></div></section>` : ''}
+  ${live.length ? `<section class="block"><div class="block-head"><h2>Trwa teraz <span class="muted">${live.length}</span></h2>${showR1() ? '<a class="btn ghost sm" href="#/runda1">1. runda →</a>' : '<a class="btn ghost sm" href="#/drabinka">Drabinka →</a>'}</div><div class="live-grid">${live.map(featured).join('')}</div></section>` : rs.length ? `<section class="block"><div class="block-head"><h2>Trwa teraz</h2>${showR1() ? '<a class="btn ghost sm" href="#/runda1">1. runda →</a>' : '<a class="btn ghost sm" href="#/drabinka">Drabinka →</a>'}</div><div class="empty spot"><p class="muted">W tej chwili nie trwa żadna walka.</p></div></section>` : ''}
   ${upcoming.length ? `<section class="block"><div class="block-head"><h2>Następne walki</h2></div><div class="grid duels-open">${upcoming.map((d) => duelMini(d)).join('')}</div></section>` : ''}
   ${recent.length ? `<section class="block"><div class="block-head"><h2>Ostatnie wyniki</h2></div><div class="grid duels-open">${recent.map((d) => duelMini(d)).join('')}</div></section>` : ''}
   ${rs.length ? '' : `<section class="block"><div class="empty spot"><div class="empty-ico">⚔︎</div><h3>Igrzyska jeszcze się nie zaczęły</h3><p class="muted">${ps.length ? `${ps.length} zawodników czeka na 1. rundę.` : 'Najpierw zapiszcie się i poczekajcie, aż admin doda was jako zawodników.'}</p>${S.admin ? `<a class="btn btn-gold" href="#/admin">Ułóż 1. rundę</a>` : ''}</div></section>`}
-  ${unused.length ? `<section class="marquee" aria-label="Kategorie w puli"><div class="mq-track">${[...unused, ...unused].map((c) => `<span>${esc(c.emoji || '◆')} ${esc(c.name)}</span>`).join('')}</div></section>` : ''}`;
+  ${S.admin && unused.length ? `<section class="marquee" aria-label="Kategorie w puli"><div class="mq-track">${[...unused, ...unused].map((c) => `<span>${esc(c.emoji || '◆')} ${esc(c.name)}</span>`).join('')}</div></section>` : ''}`;
 }
 
 // zakładka „1. runda” jest tymczasowa: znika, gdy wszystkie walki 1. rundy mają wynik
@@ -477,7 +478,12 @@ function render() {
   const sc = document.getElementById('rounds')?.scrollLeft || 0;
   const sb = document.getElementById('bracket')?.scrollLeft || 0;
   const views = { arena: viewArena, runda1: viewRound1, drabinka: viewBracketPage, zawodnicy: viewPlayers, kategorie: viewCategories, typy: viewTips, admin: viewAdmin, profil: viewProfile };
-  if (S.route === 'runda1' && !S.loading && !showR1()) { S.route = 'drabinka'; history.replaceState(null, '', '#/drabinka'); }
+  if (!S.loading) {
+    const go = (r) => { S.route = r; history.replaceState(null, '', '#/' + r); };
+    if (S.route === 'runda1' && !showR1()) go('drabinka');
+    else if (S.route === 'drabinka' && showR1()) go('runda1');
+    else if (S.route === 'kategorie' && !S.admin) go('arena');
+  }
   const v = views[S.route] || viewArena;
   app.innerHTML = header() + `<main>${S.loading ? '<div class="loader"><span></span></div>' : v()}</main><footer class="foot">Igrzyska · zrobione dla ekipy</footer>` + modalHtml();
   const rEl = document.getElementById('rounds'); if (rEl) rEl.scrollLeft = sc;

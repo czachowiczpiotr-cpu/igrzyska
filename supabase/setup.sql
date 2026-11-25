@@ -85,7 +85,8 @@ end $$;
 drop trigger if exists ig_guard_profile on ig_profiles;
 create trigger ig_guard_profile before update on ig_profiles for each row execute function ig_guard_profile();
 
-create policy ig_cat_read on ig_categories for select using (true);
+-- Kategorie są tajne: zwykli użytkownicy widzą tylko te przypisane do walk.
+create policy ig_cat_read on ig_categories for select using (ig_is_admin() or exists (select 1 from ig_duels d where d.category_id = ig_categories.id));
 create policy ig_cat_write on ig_categories for all using (ig_is_admin()) with check (ig_is_admin());
 create policy ig_round_read on ig_rounds for select using (true);
 create policy ig_round_write on ig_rounds for all using (ig_is_admin()) with check (ig_is_admin());
@@ -116,3 +117,7 @@ grant execute on function ig_is_admin() to anon, authenticated;
 
 -- Migracja 2026-11-25 (dla istniejącej bazy):
 alter table ig_rounds add column if not exists bracket boolean not null default false;
+
+-- Migracja 2026-11-25b (tajne kategorie):
+drop policy if exists ig_cat_read on ig_categories;
+create policy ig_cat_read on ig_categories for select using (ig_is_admin() or exists (select 1 from ig_duels d where d.category_id = ig_categories.id));
