@@ -335,3 +335,4 @@ details.adm:not([open]) summary { margin-bottom: 0; }
 @media (max-width: 760px) { .bracket { grid-auto-columns: 78%; } }
 .admin-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; margin: 22px 0 0; border-color: rgba(246,196,83,.3); }
 .admin-strip > .muted { flex: 1; min-width: 220px; }
+.r1-done .duel-mini { height: 100%; }

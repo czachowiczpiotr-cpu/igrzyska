@@ -1,4 +1,4 @@
-import { makeApi } from './api.js?v=10';
+import { makeApi } from './api.js?v=11';
 
 const api = await makeApi();
 const S = {
@@ -123,7 +123,7 @@ function toast(msg, kind = 'ok') {
 const NAV = [['arena', 'Arena'], ['drabinka', 'Drabinka'], ['zawodnicy', 'Zawodnicy'], ['typy', 'Typy'], ['kategorie', 'Kategorie']];
 
 function header() {
-  const nav = [...NAV, ...(S.admin ? [['admin', 'Panel']] : [])];
+  const nav = [...NAV.slice(0, 1), ...(showR1() ? [['runda1', '1. runda']] : []), ...NAV.slice(1), ...(S.admin ? [['admin', 'Panel']] : [])];
   return `<header class="top">
     <a class="brand" href="#/arena"><span class="brand-mark">◆</span><span class="brand-word">IGRZYSKA</span></a>
     <nav class="nav">${nav.map(([k, l]) => `<a href="#/${k}" class="${S.route === k ? 'on' : ''}">${l}${k === 'admin' ? ' <i class="dot-admin"></i>' : ''}</a>`).join('')}</nav>
@@ -175,6 +175,23 @@ function viewArena() {
   ${recent.length ? `<section class="block"><div class="block-head"><h2>Ostatnie wyniki</h2></div><div class="grid duels-open">${recent.map((d) => duelMini(d)).join('')}</div></section>` : ''}
   ${rs.length ? '' : `<section class="block"><div class="empty spot"><div class="empty-ico">⚔︎</div><h3>Igrzyska jeszcze się nie zaczęły</h3><p class="muted">${ps.length ? `${ps.length} zawodników czeka na 1. rundę.` : 'Najpierw zapiszcie się i poczekajcie, aż admin doda was jako zawodników.'}</p>${S.admin ? `<a class="btn btn-gold" href="#/admin">Ułóż 1. rundę</a>` : ''}</div></section>`}
   ${unused.length ? `<section class="marquee" aria-label="Kategorie w puli"><div class="mq-track">${[...unused, ...unused].map((c) => `<span>${esc(c.emoji || '◆')} ${esc(c.name)}</span>`).join('')}</div></section>` : ''}`;
+}
+
+// zakładka „1. runda” jest tymczasowa: znika, gdy wszystkie walki 1. rundy mają wynik
+const firstRound = () => rounds().find((r) => !r.bracket);
+function showR1() {
+  const r1 = firstRound(); if (!r1) return true;
+  const ds = duelsOf(r1.id); return !ds.length || ds.some((d) => d.status !== 'done');
+}
+function viewRound1() {
+  const r1 = firstRound(); const ds = r1 ? duelsOf(r1.id) : [];
+  const done = ds.filter((d) => d.status === 'done').length;
+  return `<section class="block">
+    <div class="block-head"><h2>1. runda</h2>${ds.length ? `<span class="pill">${done}/${ds.length} rozegranych</span>` : ''}</div>
+    <p class="lead small">Zwycięzcy trafią losowo do drabinki. Ta zakładka zniknie, gdy wszystkie walki będą rozegrane.</p>
+    ${ds.length ? `<div class="live-grid">${ds.map((d) => (d.status === 'done' ? `<div class="r1-done">${duelMini(d)}</div>` : featured(d))).join('')}</div>`
+    : `<div class="empty spot"><h3>Pary 1. rundy jeszcze nie są wpisane</h3><p class="muted">${S.admin ? 'Wpisz je w Panelu: „Ułóż pary ręcznie”.' : 'Pojawią się tu, gdy admini je wpiszą.'}</p>${S.admin ? '<a class="btn btn-gold" href="#/admin">Przejdź do Panelu</a>' : ''}</div>`}
+  </section>`;
 }
 
 function viewBracketPage() {
@@ -457,7 +474,8 @@ function render() {
   S.dirty = false;
   const sc = document.getElementById('rounds')?.scrollLeft || 0;
   const sb = document.getElementById('bracket')?.scrollLeft || 0;
-  const views = { arena: viewArena, drabinka: viewBracketPage, zawodnicy: viewPlayers, kategorie: viewCategories, typy: viewTips, admin: viewAdmin, profil: viewProfile };
+  const views = { arena: viewArena, runda1: viewRound1, drabinka: viewBracketPage, zawodnicy: viewPlayers, kategorie: viewCategories, typy: viewTips, admin: viewAdmin, profil: viewProfile };
+  if (S.route === 'runda1' && !S.loading && !showR1()) { S.route = 'drabinka'; history.replaceState(null, '', '#/drabinka'); }
   const v = views[S.route] || viewArena;
   app.innerHTML = header() + `<main>${S.loading ? '<div class="loader"><span></span></div>' : v()}</main><footer class="foot">Igrzyska · zrobione dla ekipy</footer>` + modalHtml();
   const rEl = document.getElementById('rounds'); if (rEl) rEl.scrollLeft = sc;
